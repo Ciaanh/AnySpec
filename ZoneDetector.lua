@@ -22,7 +22,6 @@ local DIFFICULTY_MYTHIC_KEYSTONE = 8
 local eventFrame = CreateFrame("Frame")
 
 local function OnEvent(self, event, ...)
-    print("|cff00aaffAnySpec|r [ZoneDetector] Event: " .. tostring(event))
     if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
         ZD:OnZoneChanged()
     end
@@ -55,13 +54,11 @@ local function GetEJDungeonIDByName(instanceName)
             if not id then break end
             if name and name == instanceName then
                 EJ_SelectTier(savedTier)
-                print("|cff00aaffAnySpec|r [ZoneDetector] Matched '" .. instanceName .. "' to EJ ID " .. tostring(id))
                 return id
             end
         end
     end
     EJ_SelectTier(savedTier)
-    print("|cff00aaffAnySpec|r [ZoneDetector] No EJ match found for '" .. instanceName .. "'")
     return nil
 end
 
@@ -82,17 +79,11 @@ function ZD:GetCurrentZoneInfo()
     --   dynamicDifficulty, isDynamic, instanceID, instanceGroupSize, lfgDungeonID
     local instName, instType, instDiff, _, _, _, _, instID, _, lfgDungeonID = GetInstanceInfo()
 
-    print("|cff00aaffAnySpec|r [ZoneDetector] GetCurrentZoneInfo: name=" .. tostring(instName) 
-        .. ", type=" .. tostring(instType) .. ", diff=" .. tostring(instDiff)
-        .. ", instanceID=" .. tostring(instID) .. ", lfgDungeonID=" .. tostring(lfgDungeonID))
-
     local category = self:ClassifyInstance(instType, instDiff)
 
     -- Try to find the EJ dungeon ID by matching the instance name
     local ejDungeonID = GetEJDungeonIDByName(instName)
     local usedID = ejDungeonID or lfgDungeonID or instID
-    
-    print("|cff00aaffAnySpec|r [ZoneDetector] Using ID: " .. tostring(usedID) .. " (ejID=" .. tostring(ejDungeonID) .. ")")
 
     return {
         category = category,
@@ -127,7 +118,7 @@ end
 -- Called whenever the zone changes; notifies AutoSwitch
 function ZD:OnZoneChanged()
     local zoneInfo = self:GetCurrentZoneInfo()
-    print("|cff00aaffAnySpec|r [ZoneDetector] OnZoneChanged: " .. tostring(zoneInfo and zoneInfo.category) .. ", instance=" .. tostring(zoneInfo and zoneInfo.instanceID) .. ", name=" .. tostring(zoneInfo and zoneInfo.instanceName))
+
     if zoneInfo then
         AnySpec.AutoSwitch:OnZoneChanged(zoneInfo)
     end

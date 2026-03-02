@@ -21,7 +21,6 @@ local function OnEvent(self, event, ...)
             SM:ApplyLoadout(loadoutID)
         end
 
-        AnySpec.UI.SpecButtons:Refresh()
         AnySpec.UI.QuickSwitch:Refresh()
 
     elseif event == "SPECIALIZATION_CHANGE_CAST_FAILED" then

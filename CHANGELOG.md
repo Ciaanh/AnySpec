@@ -11,22 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of AnySpec addon
 - Minimap button for quick access (draggable, left-click for settings, right-click for spec selector)
 - Spec selector popup showing all available specializations
-- Draggable quick-access buttons (Plumber-style) for creating action bar macros
-- Content-based spec assignments:
-  - Per-category assignments (Open World, Dungeon, Mythic+, Raid, PvP, Arena, Delve)
-  - Per-instance assignments
-  - Per-difficulty assignments
-  - Combined instance+difficulty assignments
-- Smart assignment resolution (most specific match wins)
+- Draggable quick-access Spec Selector button for creating an action bar macro
+- Content-based spec assignments
 - Loadout support - pair spec switches with talent loadout configurations
 - Auto-switch proposal toasts when entering content with configured assignments
-- Proposal suppression during combat (queued for out-of-combat)
-- Temporary proposal dismissal (60-second cooldown)
+- Temporary proposal dismissal (8-second cooldown)
 - Localization system with English (enUS) as default
 - Slash commands: `/anyspec`, `/anyspec switch`, `/anyspec config`, `/anyspec help`
 - Account-wide settings (AnySpecDB) and per-character assignments (AnySpecCharDB)
-
-### Fixed
-- Locale table initialization error when loading localization files via XML
 
 [0.1.0]: https://github.com/Ciaanh/AnySpec/releases/tag/v0.1.0

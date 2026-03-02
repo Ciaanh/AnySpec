@@ -2,7 +2,9 @@
 -- Initialization, event frame, saved variables, slash commands
 
 AnySpec = AnySpec or {}
+AnySpec.L = AnySpec.L or {}  -- Locale table, populated by Locales/*.lua files
 local AS = AnySpec
+local L = AnySpec.L
 
 -- Saved variable defaults
 local DB_DEFAULTS = {
@@ -61,7 +63,6 @@ local function OnEvent(self, event, ...)
         AS.ZoneDetector:Init()
         AS.AutoSwitch:Init()
         AS.UI.MainFrame:Init()
-        AS.UI.SpecButtons:Init()
         AS.UI.QuickSwitch:Init()
         AS.UI.Proposal:Init()
         AS.UI.Config:Init()
@@ -90,12 +91,14 @@ SlashCmdList["ANYSPEC"] = function(msg)
     elseif cmd == "switch" then
         AS.UI.QuickSwitch:Toggle()
     elseif cmd == "help" then
-        print("|cff00aaffAnySpec|r commands:")
-        print("  /anyspec           - Open settings")
-        print("  /anyspec switch    - Toggle quick-switch panel")
-        print("  /anyspec config    - Open settings")
-        print("  /anyspec help      - Show this help")
+        local L = AnySpec.L
+        print(L["CMD_HELP_HEADER"])
+        print(L["CMD_HELP_OPEN"])
+        print(L["CMD_HELP_SWITCH"])
+        print(L["CMD_HELP_CONFIG"])
+        print(L["CMD_HELP_HELP"])
     else
-        print("|cff00aaffAnySpec|r: Unknown command '" .. cmd .. "'. Type /anyspec help for usage.")
+        local L = AnySpec.L
+        print(string.format(L["CMD_ERR_UNKNOWN"], cmd))
     end
 end

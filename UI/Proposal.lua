@@ -7,6 +7,7 @@ AnySpec    = AnySpec    or {}
 AnySpec.UI = AnySpec.UI or {}
 AnySpec.UI.Proposal = AnySpec.UI.Proposal or {}
 local PR = AnySpec.UI.Proposal
+local L  = AnySpec.L
 
 ------------------------------------------------------------
 -- Layout constants
@@ -88,7 +89,7 @@ end
 ------------------------------------------------------------
 local function CreateToast()
     local f = CreateFrame("Frame", "AnySpecProposalToast", UIParent, "BackdropTemplate")
-    f:SetFrameStrata("HIGH")
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetClampedToScreen(true)
     f:Hide()
 
@@ -267,7 +268,7 @@ local function BuildRows(assignments)
                 loadoutLbl:SetText(loadoutName)
                 loadoutLbl:SetTextColor(0.62, 0.62, 0.62)
             else
-                loadoutLbl:SetText("Default loadout")
+                loadoutLbl:SetText(L["LOADOUT_DEFAULT"])
                 loadoutLbl:SetTextColor(0.35, 0.35, 0.35)
             end
 
@@ -331,13 +332,10 @@ end
 
 -- assignments = array of { specIndex, loadoutID }
 function PR:Show(assignments, zoneInfo)
-    print("|cff00aaffAnySpec|r [Proposal] Show: assignments=" .. tostring(assignments) .. ", count=" .. (assignments and #assignments or 0) .. ", zone=" .. tostring(zoneInfo and zoneInfo.instanceID))
     if not toast then
-        print("|cff00aaffAnySpec|r [Proposal] Show: toast not initialized")
         return
     end
     if not assignments or #assignments == 0 then
-        print("|cff00aaffAnySpec|r [Proposal] Show: no assignments")
         return
     end
 
@@ -361,7 +359,7 @@ function PR:Show(assignments, zoneInfo)
     if showHint then
         local keys = {}
         for i = 1, numRows do tinsert(keys, tostring(i)) end
-        toast._hint:SetText("Press " .. table.concat(keys, "-") .. " or click  ·  ESC to dismiss")
+        toast._hint:SetText(string.format(L["PROPOSAL_HINT"], table.concat(keys, "-")))
         toast._hint:Show()
     else
         toast._hint:Hide()
@@ -396,7 +394,7 @@ function PR:OnAccept(idx)
     local ok, err = AnySpec.SpecManager:SwitchSpec(chosen.specIndex, chosen.loadoutID)
 
     if not ok then
-        toast._header:SetText("|cffff4444" .. (err or "Switch failed.") .. "|r")
+        toast._header:SetText("|cffff4444" .. (err or L["PROPOSAL_SWITCH_FAILED"]) .. "|r")
         SetRowsEnabled(true)
         toast:EnableKeyboard(true)
         state.timerElapsed = 0
@@ -404,7 +402,7 @@ function PR:OnAccept(idx)
         return
     end
 
-    toast._header:SetText("Switching to " .. label .. "…")
+    toast._header:SetText(string.format(L["PROPOSAL_SWITCHING"], label))
     currentAssignments = nil
     currentZoneInfo    = nil
     C_Timer.After(3, function()
@@ -448,7 +446,7 @@ end
 -- Called when combat starts while toast is visible
 function PR:OnSpecSwitchFailed()
     if not toast or not toast:IsShown() then return end
-    toast._header:SetText("|cffff4444Spec switch failed.|r")
+    toast._header:SetText("|cffff4444" .. L["PROPOSAL_SWITCH_FAILED"] .. "|r")
     SetRowsEnabled(true)
     toast:EnableKeyboard(true)
     state.timerElapsed = 0

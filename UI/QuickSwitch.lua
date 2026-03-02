@@ -6,6 +6,7 @@ AnySpec = AnySpec or {}
 AnySpec.UI = AnySpec.UI or {}
 AnySpec.UI.QuickSwitch = AnySpec.UI.QuickSwitch or {}
 local QS = AnySpec.UI.QuickSwitch
+local L  = AnySpec.L
 
 local PADDING     = 12
 local ROW_HEIGHT  = 60
@@ -146,7 +147,7 @@ local function BuildSpecRows(parent)
             -- Label
             local loadoutLabel = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             loadoutLabel:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -6)
-            loadoutLabel:SetText("Loadout:")
+            loadoutLabel:SetText(L["QS_LOADOUT_LABEL"])
             loadoutLabel:SetTextColor(0.7, 0.7, 0.7)
 
             local labelWidth = math.floor(loadoutLabel:GetStringWidth() + 0.5)
@@ -175,10 +176,10 @@ local function BuildSpecRows(parent)
             dropdownText:SetPoint("RIGHT", dropdownBtn, "RIGHT", -20, 0)
             dropdownText:SetJustifyH("LEFT")
             if row.currentTalentsUnsaved then
-                dropdownText:SetText("Unsaved")
+                dropdownText:SetText(L["QS_LOADOUT_UNSAVED"])
                 dropdownText:SetTextColor(1, 0.82, 0)
             else
-                dropdownText:SetText("Select...")
+                dropdownText:SetText(L["QS_LOADOUT_SELECT"])
                 dropdownText:SetTextColor(1, 1, 1)
             end
             dropdownBtn.text = dropdownText
@@ -269,7 +270,7 @@ local function BuildSpecRows(parent)
                     menu:Hide()
                     
                     -- Print feedback
-                    print("|cff00aaffAnySpec|r: Selected loadout '" .. item.name .. "' for " .. spec.name)
+                    print(string.format(L["QS_SELECTED_LOADOUT"], item.name, spec.name))
                 end)
                 
                 table.insert(menuButtons, menuBtn)
@@ -344,9 +345,9 @@ local function BuildSpecRows(parent)
         row:SetScript("OnClick", function()
             local loadoutToUse = selectedLoadoutsBySpec[specIdx]
             if loadoutToUse then
-                print("|cff00aaffAnySpec|r: Switching to " .. spec.name .. " and applying selected loadout...")
+                print(string.format(L["QS_SWITCHING_WITH_LOADOUT"], spec.name))
             else
-                print("|cff00aaffAnySpec|r: Switching to " .. spec.name)
+                print(string.format(L["QS_SWITCHING"], spec.name))
             end
             AnySpec.SpecManager:SwitchSpec(specIdx, loadoutToUse)
             QS:Hide()
@@ -422,7 +423,7 @@ function QS:Show()
     modal:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 
     modal:Show()
-    print("|cff00aaffAnySpec|r: Select a loadout (or keep current), then click the spec to switch (ESC to close)")
+    print(L["QS_INTRO_TIP"])
 end
 
 function QS:Hide()

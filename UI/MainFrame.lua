@@ -7,6 +7,7 @@ AnySpec     = AnySpec     or {}
 AnySpec.UI  = AnySpec.UI  or {}
 AnySpec.UI.MainFrame = AnySpec.UI.MainFrame or {}
 local MF = AnySpec.UI.MainFrame
+local L  = AnySpec.L
 
 ------------------------------------------------------------
 -- Layout constants
@@ -90,18 +91,18 @@ local function CreateDragButton(parent, iconTex, text, tip, acquireFn)
     local hint = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("RIGHT", btn, "RIGHT", -4, 0)
     hint:SetTextColor(0.45, 0.45, 0.45)
-    hint:SetText("drag")
+    hint:SetText(L["QUICKACCESS_DRAG_HINT"])
 
     btn:SetScript("OnDragStart", function()
         if InCombatLockdown() then
-            print("|cff00aaffAnySpec|r: Cannot create macros during combat.")
+            print(L["ERR_COMBAT_MACRO"])
             return
         end
         local id = acquireFn()
         if id then
             PickupMacro(id)
         else
-            print("|cff00aaffAnySpec|r: No character macro slot available.")
+            print(L["ERR_NO_MACRO_SLOT"])
         end
     end)
     btn:SetScript("OnEnter", function(self)
@@ -161,9 +162,8 @@ end
 -- Loadout names are shown only in the tooltip (via CreateAssignButton).
 local function GetAssignmentSummary(instanceID)
     local asgn = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
-    print("|cff00aaffAnySpec|r [MainFrame] GetAssignmentSummary(instance[" .. tostring(instanceID) .. "]) = " .. tostring(asgn))
     if not asgn or #asgn == 0 then
-        return "|cff555555None|r"
+        return L["ASSIGNMENT_NONE"]
     end
     local parts = {}
     for _, pair in ipairs(asgn) do
@@ -205,7 +205,7 @@ local DIALOG_MAX_ROWS = 3
 local ROWS_START_Y    = -(DIALOG_HDR_H + 4)  -- y offset where first row starts
 
 local function GetLoadoutItemsForSpec(specIndex)
-    local items = { { label = "Default loadout", value = nil } }
+    local items = { { label = L["LOADOUT_DEFAULT"], value = nil } }
     for _, l in ipairs(AnySpec.SpecManager:GetLoadoutsForSpec(specIndex)) do
         tinsert(items, { label = l.name, value = l.configID })
     end
@@ -213,34 +213,26 @@ local function GetLoadoutItemsForSpec(specIndex)
 end
 
 local function SaveDialogAssignments()
-    print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments called, currentDialogInstID=" .. tostring(currentDialogInstID))
     if not currentDialogInstID then
-        print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments: no currentDialogInstID")
         return
     end
     local charDB = AnySpec.charDB
     if not charDB then
-        print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments: charDB not ready")
         return
     end
 
     local pairs = {}
     for i, r in ipairs(dialogRows) do
         local specVal = r.specDD:GetSelected()
-        print("|cff00aaffAnySpec|r [MainFrame] Row " .. i .. ": specVal=" .. tostring(specVal))
         if specVal then
             local loadoutVal = r.loadoutDD:GetSelected()
-            print("|cff00aaffAnySpec|r [MainFrame] Row " .. i .. ": adding spec=" .. tostring(specVal) .. ", loadout=" .. tostring(loadoutVal))
             tinsert(pairs, { specIndex = specVal, loadoutID = loadoutVal })
         end
     end
 
-    print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments: " .. #pairs .. " pairs total")
     if #pairs == 0 then
-        print("|cff00aaffAnySpec|r [MainFrame] Clearing instance " .. tostring(currentDialogInstID))
         charDB.instanceAssignments[currentDialogInstID] = nil
     else
-        print("|cff00aaffAnySpec|r [MainFrame] Saving to instance[" .. tostring(currentDialogInstID) .. "]: " .. tostring(pairs))
         charDB.instanceAssignments[currentDialogInstID] = pairs
     end
 
@@ -273,13 +265,10 @@ end
 
 -- Adds one pair row to the open dialog. specIndex may be nil (placeholder).
 local function AddDialogRow(specIndex, loadoutID)
-    print("|cff00aaffAnySpec|r [MainFrame] AddDialogRow: specIndex=" .. tostring(specIndex) .. ", loadoutID=" .. tostring(loadoutID))
     if not assignmentDialog then
-        print("|cff00aaffAnySpec|r [MainFrame] AddDialogRow: assignmentDialog not ready")
         return
     end
     if #dialogRows >= DIALOG_MAX_ROWS then
-        print("|cff00aaffAnySpec|r [MainFrame] AddDialogRow: max rows reached")
         return
     end
 
@@ -310,7 +299,7 @@ local function AddDialogRow(specIndex, loadoutID)
     -- Spec dropdown
     local specDD = AnySpec.UI.Widgets.CreateCustomDropdown(row, 110)
     specDD:SetPoint("LEFT", numLbl, "RIGHT", 6, 0)
-    specDD:SetPlaceholder("Select spec…")
+    specDD:SetPlaceholder(L["DIALOG_SPEC_PLACEHOLDER"])
     local specs = AnySpec.SpecManager:GetAllSpecs()
     local specItems = {}
     for _, s in ipairs(specs) do
@@ -420,7 +409,7 @@ local function CreateAssignmentDialog()
     -- Add button (repositioned by ResizeDialog)
     local addBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
     addBtn:SetSize(90, 24)
-    addBtn:SetText("+ Add")
+    addBtn:SetText(L["DIALOG_ADD_PAIR"])
     addBtn:SetPoint("TOPLEFT", d, "TOPLEFT", DIALOG_PAD, ROWS_START_Y - 6)
     d._addBtn = addBtn
 
@@ -450,9 +439,7 @@ end
 
 -- Opens (or re-populates) the assignment dialog for the given instance.
 local function OpenAssignmentDialog(instanceID, instanceName)
-    print("|cff00aaffAnySpec|r [MainFrame] OpenAssignmentDialog: instanceID=" .. tostring(instanceID) .. ", name=" .. tostring(instanceName))
     if not assignmentDialog then
-        print("|cff00aaffAnySpec|r [MainFrame] assignmentDialog not created")
         return
     end
 
@@ -464,19 +451,14 @@ local function OpenAssignmentDialog(instanceID, instanceName)
     wipe(dialogRows)
 
     currentDialogInstID = instanceID
-    assignmentDialog._title:SetText(instanceName or "Instance")
+    assignmentDialog._title:SetText(instanceName or L["DIALOG_INSTANCE_FALLBACK"])
 
     -- Populate from saved data
     local saved = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
-    print("|cff00aaffAnySpec|r [MainFrame] OpenAssignmentDialog: saved data for instance[" .. tostring(instanceID) .. "] = " .. tostring(saved))
     if saved and #saved > 0 then
-        print("|cff00aaffAnySpec|r [MainFrame] Loading " .. #saved .. " saved assignments")
         for i, pair in ipairs(saved) do
-            print("|cff00aaffAnySpec|r [MainFrame] Pair " .. i .. ": spec=" .. tostring(pair.specIndex) .. ", loadout=" .. tostring(pair.loadoutID))
             AddDialogRow(pair.specIndex, pair.loadoutID)
         end
-    else
-        print("|cff00aaffAnySpec|r [MainFrame] No saved assignments found")
     end
 
     ResizeDialog()
@@ -614,7 +596,7 @@ local function RebuildInstanceList(tierIndex, isRaid)
         local empty = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         empty:SetPoint("CENTER", scrollChild, "CENTER", 0, -40)
         empty:SetTextColor(0.45, 0.45, 0.45)
-        empty:SetText("No instances for this combination.")
+        empty:SetText(L["INSTANCES_EMPTY"])
         scrollChild._emptyLabel = empty
     end
 end
@@ -657,8 +639,8 @@ end
 local function BuildRightPanel(parent)
     -- ── Tab buttons ───────────────────────────────────────
     local tabDefs = {
-        { key = "dungeons", label = "Dungeons" },
-        { key = "raids",    label = "Raids"    },
+        { key = "dungeons", label = L["TAB_DUNGEONS"] },
+        { key = "raids",    label = L["TAB_RAIDS"]    },
     }
     local tx = 12
     for _, td in ipairs(tabDefs) do
@@ -705,7 +687,7 @@ local function BuildRightPanel(parent)
             UIDropDownMenu_AddButton(info, level)
         end
     end)
-    UIDropDownMenu_SetText(tierDropdown, "Expansion...")
+    UIDropDownMenu_SetText(tierDropdown, L["TIER_DROPDOWN_DEFAULT"])
 
     -- ── Separator below tabs ──────────────────────────────
     local sep = parent:CreateTexture(nil, "ARTWORK")
@@ -815,9 +797,29 @@ local function CreateMainFrame()
     viewContainer:SetPoint("TOPLEFT",     f, "TOPLEFT",     1 + LEFT_W + DIVIDER_W, -(HEADER_H + 1))
     viewContainer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
 
+    -- View title strip
+    local VIEW_TITLE_H = 32
+    local viewTitleBg = viewContainer:CreateTexture(nil, "BACKGROUND")
+    viewTitleBg:SetPoint("TOPLEFT",  viewContainer, "TOPLEFT",  0, 0)
+    viewTitleBg:SetPoint("TOPRIGHT", viewContainer, "TOPRIGHT", 0, 0)
+    viewTitleBg:SetHeight(VIEW_TITLE_H)
+    viewTitleBg:SetColorTexture(0.04, 0.04, 0.04, 0.9)
+
+    local viewTitleText = viewContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    viewTitleText:SetPoint("TOPLEFT", viewContainer, "TOPLEFT", 14, -(VIEW_TITLE_H / 2 - 7))
+    viewTitleText:SetTextColor(0.9, 0.9, 0.9)
+
+    local viewTitleSep = viewContainer:CreateTexture(nil, "ARTWORK")
+    viewTitleSep:SetPoint("TOPLEFT",  viewContainer, "TOPLEFT",  0, -VIEW_TITLE_H)
+    viewTitleSep:SetPoint("TOPRIGHT", viewContainer, "TOPRIGHT", 0, -VIEW_TITLE_H)
+    viewTitleSep:SetHeight(1)
+    viewTitleSep:SetColorTexture(0.28, 0.28, 0.32, 1)
+
     -- Views will be created as children of viewContainer
-    local views = {}
-    
+    local views     = {}
+    local navLinks  = {}  -- keyed by viewName, value = btn
+    local viewNames = { locations = L["VIEW_LOCATIONS"], settings = L["VIEW_SETTINGS"] }
+
     -- Switch to a view
     local function ShowView(viewName)
         for name, view in pairs(views) do
@@ -828,6 +830,22 @@ local function CreateMainFrame()
             end
         end
         currentView = viewName
+        -- Update title
+        viewTitleText:SetText(viewNames[viewName] or viewName)
+        -- Update nav link highlights
+        for name, btn in pairs(navLinks) do
+            local isActive = (name == viewName)
+            if btn._text then
+                if isActive then
+                    btn._text:SetTextColor(1, 1, 1)
+                else
+                    btn._text:SetTextColor(0.4, 0.8, 1)
+                end
+            end
+            if btn._accent then
+                btn._accent:SetShown(isActive)
+            end
+        end
     end
 
     ----========════════════════════════════════════════════════
@@ -835,7 +853,8 @@ local function CreateMainFrame()
     ----========════════════════════════════════════════════════
     local function CreateLocationsView()
         local view = CreateFrame("Frame", nil, viewContainer)
-        view:SetAllPoints(viewContainer)
+        view:SetPoint("TOPLEFT",     viewContainer, "TOPLEFT",     0, -(VIEW_TITLE_H + 1))
+        view:SetPoint("BOTTOMRIGHT", viewContainer, "BOTTOMRIGHT", 0, 0)
         views.locations = view
 
         -- This view uses the existing right panel setup
@@ -848,7 +867,8 @@ local function CreateMainFrame()
     ----========════════════════════════════════════════════════
     local function CreateSettingsView()
         local view = CreateFrame("Frame", nil, viewContainer)
-        view:SetAllPoints(viewContainer)
+        view:SetPoint("TOPLEFT",     viewContainer, "TOPLEFT",     0, -(VIEW_TITLE_H + 1))
+        view:SetPoint("BOTTOMRIGHT", viewContainer, "BOTTOMRIGHT", 0, 0)
         views.settings = view
         
         local y = -14
@@ -856,7 +876,7 @@ local function CreateMainFrame()
         -- ── Toast Position ──────────────────────────────
         local posHdr = view:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         posHdr:SetPoint("TOPLEFT", view, "TOPLEFT", 12, y)
-        posHdr:SetText("Toast Position")
+        posHdr:SetText(L["SETTINGS_TOAST_POSITION"])
         y = y - 26
         
         local posDesc = view:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -865,15 +885,15 @@ local function CreateMainFrame()
         posDesc:SetJustifyH("LEFT")
         posDesc:SetWordWrap(true)
         posDesc:SetTextColor(0.55, 0.55, 0.55)
-        posDesc:SetText("Choose where the spec+loadout proposal toast appears:")
+        posDesc:SetText(L["SETTINGS_TOAST_POSITION_DESC"])
         y = y - (math.max(14, math.floor(posDesc:GetStringHeight() + 0.5))) - 8
         
         -- Position buttons
         local positions = {
-            { key = "top_center",    label = "Top Center" },
-            { key = "center",        label = "Center" },
-            { key = "top_right",     label = "Top Right" },
-            { key = "bottom_center", label = "Bottom Center" },
+            { key = "top_center",    label = L["POS_TOP_CENTER"] },
+            { key = "center",        label = L["POS_CENTER"] },
+            { key = "top_right",     label = L["POS_TOP_RIGHT"] },
+            { key = "bottom_center", label = L["POS_BOTTOM_CENTER"] },
         }
         
         local posButtons = {}
@@ -917,7 +937,7 @@ local function CreateMainFrame()
         y = y - 10
         local setHdr = view:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
         setHdr:SetPoint("TOPLEFT", view, "TOPLEFT", 12, y)
-        setHdr:SetText("Settings")
+        setHdr:SetText(L["VIEW_SETTINGS"])
         y = y - 26
         
         -- Helper to build a checkbox in settings view
@@ -931,14 +951,14 @@ local function CreateMainFrame()
             return cb
         end
 
-        Checkbox("Minimap button", function()
+        Checkbox(L["SETTINGS_MINIMAP"], function()
             return AnySpec.db and AnySpec.db.minimapButton ~= false
         end, function(val)
             if AnySpec.db then AnySpec.db.minimapButton = val end
             AnySpec.UI.MinimapButton:SetShown(val)
         end)
 
-        Checkbox("Enable auto-switch proposals", function()
+        Checkbox(L["SETTINGS_AUTO_SWITCH"], function()
             return AnySpec.db and AnySpec.db.proposalEnabled ~= false
         end, function(val)
             if AnySpec.db then AnySpec.db.proposalEnabled = val end
@@ -950,7 +970,7 @@ local function CreateMainFrame()
         local testBtn = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
         testBtn:SetSize(340, 24)
         testBtn:SetPoint("TOPLEFT", view, "TOPLEFT", 12, y)
-        testBtn:SetText("Test Proposal Toast")
+        testBtn:SetText(L["SETTINGS_TEST_TOAST"])
         testBtn:SetScript("OnClick", function()
             local specs = AnySpec.SpecManager:GetAllSpecs()
             local testAssignments = {}
@@ -975,6 +995,11 @@ local function CreateMainFrame()
             AnySpec.UI.Proposal:Show(testAssignments, testZoneInfo)
         end)
         
+        -- Refresh button states every time the view becomes visible
+        view:SetScript("OnShow", function()
+            UpdatePositionButtons()
+        end)
+        
         view:Hide()
         return view
     end
@@ -992,7 +1017,7 @@ local function CreateMainFrame()
     -- ── Quick Access ──────────────────────────────────────
     local hdr = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     hdr:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
-    hdr:SetText("Quick Access")
+    hdr:SetText(L["QUICKACCESS_TITLE"])
     y = y - 22
 
     local desc = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1002,7 +1027,7 @@ local function CreateMainFrame()
     desc:SetJustifyV("TOP")
     desc:SetWordWrap(true)
     desc:SetTextColor(0.55, 0.55, 0.55)
-    desc:SetText("Drag to action bars to create macro shortcuts.")
+    desc:SetText(L["QUICKACCESS_DESC"])
     local descHeight = math.max(14, math.floor(desc:GetStringHeight() + 0.5))
     y = y - descHeight - 8
 
@@ -1014,49 +1039,77 @@ local function CreateMainFrame()
         if info then switchIcon = info.icon end
     end
 
-    local switchDrag = CreateDragButton(leftPanel, switchIcon, "Spec Selector",
-        "Opens a popup to choose any specialization.", function()
+    local switchDrag = CreateDragButton(leftPanel, switchIcon, L["QUICKACCESS_SWITCH_NAME"],
+        L["QUICKACCESS_SWITCH_TIP"], function()
             return AcquireMacro("switch", "AnySpec", switchIcon, "ANYSPEC_SWITCH")
         end)
     switchDrag:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
     y = y - 32
 
-    -- Per-spec drag buttons
-    local specs = AnySpec.SpecManager:GetAllSpecs()
-    for i, spec in ipairs(specs) do
-        local s = spec
-        local btn = CreateDragButton(leftPanel, s.icon, s.name,
-            "Switch directly to " .. s.name .. ".", function()
-                return AcquireMacro("spec" .. s.specIndex, s.name, s.icon, "ANYSPEC_SPEC" .. s.specIndex)
-            end)
-        btn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
-        y = y - 32
-    end
+    y = y - 28
+    
+    -- ── Navigation separator ──────────────────────────────
+    local navSep = leftPanel:CreateTexture(nil, "ARTWORK")
+    navSep:SetHeight(1)
+    navSep:SetWidth(LEFT_W - 24)
+    navSep:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
+    navSep:SetColorTexture(0.3, 0.3, 0.35, 0.6)
+    y = y - 10
 
-    y = y - 14
+    -- ── Navigation ────────────────────────────────────────
+    local navHdr = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    navHdr:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
+    navHdr:SetText(L["NAV_TITLE"])
+    navHdr:SetTextColor(0.6, 0.6, 0.6)
+    y = y - 18
     
     -- ── View Links ──────────────────────────────────────
     local function CreateViewLink(label, viewName, posY)
         local btn = CreateFrame("Button", nil, leftPanel)
-        btn:SetSize(LEFT_W - 24, 20)
+        btn:SetSize(LEFT_W - 24, 24)
         btn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, posY)
         
-        btn:SetNormalFontObject("GameFontNormal")
-        btn:SetHighlightFontObject("GameFontHighlight")
-        btn:GetFontString():SetText(label)
-        btn:GetFontString():SetTextColor(0.05, 0.65, 1)
+        -- Left-border accent for active state
+        local accent = btn:CreateTexture(nil, "ARTWORK")
+        accent:SetSize(3, 18)
+        accent:SetPoint("LEFT", btn, "LEFT", 0, 0)
+        accent:SetColorTexture(0.05, 0.65, 1, 1)
+        accent:Hide()
+        btn._accent = accent
+        
+        -- Label, indented past accent
+        local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        fs:SetPoint("LEFT",  btn, "LEFT",  8, 0)
+        fs:SetPoint("RIGHT", btn, "RIGHT", 0, 0)
+        fs:SetText(label)
+        fs:SetTextColor(0.4, 0.8, 1)
+        fs:SetJustifyH("LEFT")
+        btn._text = fs
         
         btn:SetScript("OnClick", function()
             ShowView(viewName)
         end)
         
+        btn:SetScript("OnEnter", function(self)
+            if self._text and currentView ~= viewName then
+                self._text:SetTextColor(0.7, 0.95, 1)
+            end
+        end)
+        
+        btn:SetScript("OnLeave", function(self)
+            if self._text and currentView ~= viewName then
+                self._text:SetTextColor(0.4, 0.8, 1)
+            end
+        end)
+        
+        navLinks[viewName] = btn
         return btn
     end
     
-    CreateViewLink("📍 Locations", "locations", y)
-    y = y - 24
+    CreateViewLink(L["NAV_LOCATIONS"], "locations", y)
+    y = y - 28
     
-    CreateViewLink("⚙ Settings", "settings", y)
+    CreateViewLink(L["NAV_SETTINGS"], "settings", y)
     
     -- Vertical divider
     local vSep = f:CreateTexture(nil, "ARTWORK")

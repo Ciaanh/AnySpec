@@ -64,7 +64,7 @@ local function CreateButton()
     -- Tooltip
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("AnySpec", 0, 0.67, 1)
+        GameTooltip:SetText(AnySpec.L["MINIMAP_TOOLTIP"], 0, 0.67, 1)
         GameTooltip:AddLine("Left-click: Open settings", 1, 1, 1)
         GameTooltip:AddLine("Right-click: Toggle spec selector", 1, 1, 1)
         GameTooltip:Show()

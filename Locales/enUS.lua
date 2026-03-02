@@ -15,15 +15,14 @@ L["QUICKACCESS_DESC"]           = "Drag to action bars to create macro shortcuts
 L["QUICKACCESS_DRAG_HINT"]      = "drag"
 L["QUICKACCESS_SWITCH_NAME"]    = "Spec Selector"
 L["QUICKACCESS_SWITCH_TIP"]     = "Opens a popup to choose any specialization."
-L["QUICKACCESS_SPEC_TIP"]       = "Switch directly to %s."
 
 -- ── Navigation (left panel links) ─────────────────────────────────────────────
 L["NAV_TITLE"]                  = "Navigate"
-L["NAV_LOCATIONS"]              = "> Locations"
+L["NAV_LOCATIONS"]              = "> Content Assignments"
 L["NAV_SETTINGS"]               = "> Settings"
 
 -- ── View titles ───────────────────────────────────────────────────────────────
-L["VIEW_LOCATIONS"]             = "Locations"
+L["VIEW_LOCATIONS"]             = "Content Assignments"
 L["VIEW_SETTINGS"]              = "Settings"
 
 -- ── Instance list (right panel – Locations view) ──────────────────────────────
@@ -71,13 +70,6 @@ L["QS_SELECTED_LOADOUT"]        = "AnySpec: Selected loadout '%s' for %s"
 -- %s = spec name
 L["QS_SWITCHING_WITH_LOADOUT"]  = "AnySpec: Switching to %s and applying selected loadout..."
 L["QS_SWITCHING"]               = "AnySpec: Switching to %s"
-
--- ── Spec buttons (action bar macros) ────────────────────────────────────────
--- %s = spec index number
-L["SPECBTN_FALLBACK_TOOLTIP"]    = "Spec %s"
-L["SPECBTN_CURRENTLY_ACTIVE"]    = "Currently active"
--- %s = button name for /click macro
-L["SPECBTN_MACRO_HINT"]          = "|cffffd700/click %s|r to use as a macro"
 
 -- ── Minimap button ────────────────────────────────────────────────────────────
 L["MINIMAP_TOOLTIP"]            = "AnySpec"
