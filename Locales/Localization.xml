@@ -1,0 +1,26 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+
+    <!-- Default English locale (always loaded) -->
+    <Script file="enUS.lua"/>
+
+    <!-- Additional language translations (add below) -->
+    <!-- Each locale file checks GetLocale() and exits early if not active -->
+    <!-- This pattern is memory-efficient: only the active locale's strings persist -->
+
+    <!-- Examples (uncomment and add translations following TEMPLATE.lua):
+    <Script file="deDE.lua"/>
+    <Script file="frFR.lua"/>
+    <Script file="itIT.lua"/>
+    <Script file="ptBR.lua"/>
+    <Script file="ruRU.lua"/>
+    <Script file="koKR.lua"/>
+    <Script file="zhCN.lua"/>
+    <Script file="zhTW.lua"/>
+    <Script file="esES.lua"/>
+    <Script file="esMX.lua"/>
+    -->
+
+    <!-- See TEMPLATE.lua and README.md for translation instructions -->
+
+</Ui>
