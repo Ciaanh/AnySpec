@@ -60,7 +60,6 @@ local function OnEvent(self, event, ...)
         AS.SpecManager:Init()
         AS.ZoneDetector:Init()
         AS.AutoSwitch:Init()
-        AS.UI.MinimapButton:Init()
         AS.UI.MainFrame:Init()
         AS.UI.SpecButtons:Init()
         AS.UI.QuickSwitch:Init()
@@ -71,6 +70,7 @@ local function OnEvent(self, event, ...)
         -- Safe point: all saved variables loaded, player data available
         AS.ZoneDetector:OnPlayerLogin()
         AS.AutoSwitch:OnPlayerLogin()
+        AS.UI.MinimapButton:Init()  -- Now spec info is available
     end
 end
 

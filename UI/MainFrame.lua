@@ -31,6 +31,12 @@ local tierDropdown   = nil
 local scrollFrame    = nil
 local scrollChild    = nil
 
+-- Assignment dialog state
+local assignmentDialog    = nil   -- modal dialog frame (created once in Init)
+local dialogRows          = {}    -- pair-row frames currently in the dialog
+local currentDialogInstID = nil   -- instanceID the dialog is currently open for
+local instanceRowRefreshFns = {}  -- [instanceID] = fn(), refreshes the row button text
+
 ------------------------------------------------------------
 -- Macro helpers  (Plumber-style drag-to-action-bar)
 ------------------------------------------------------------
@@ -146,83 +152,370 @@ local function GetInstances(tierIndex, isRaid)
 end
 
 ------------------------------------------------------------
--- Per-instance assignment button
+-- Per-instance assignment: summary helpers
 ------------------------------------------------------------
-local function GetAssignmentLabel(instanceID)
+
+-- Returns display text for the instance row button ("None" or "Holy, Protection").
+-- Loadout names are shown only in the tooltip (via CreateAssignButton).
+local function GetAssignmentSummary(instanceID)
     local asgn = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
-    if asgn and asgn.specs and #asgn.specs > 0 then
-        local names = {}
-        for _, specIdx in ipairs(asgn.specs) do
-            local info = AnySpec.SpecManager:GetSpecInfo(specIdx)
-            if info then tinsert(names, info.name) end
-        end
-        if #names > 0 then
-            return table.concat(names, ", ")
-        end
+    print("|cff00aaffAnySpec|r [MainFrame] GetAssignmentSummary(instance[" .. tostring(instanceID) .. "]) = " .. tostring(asgn))
+    if not asgn or #asgn == 0 then
+        return "|cff555555None|r"
     end
-    return "|cff555555None|r"
+    local parts = {}
+    for _, pair in ipairs(asgn) do
+        local info = AnySpec.SpecManager:GetSpecInfo(pair.specIndex)
+        if info then tinsert(parts, info.name) end
+    end
+    return #parts > 0 and table.concat(parts, ", ") or "|cff555555None|r"
 end
 
-local function CreateAssignButton(parent, instanceID, width)
-    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btn:SetSize(width, 22)
-    btn:SetText(GetAssignmentLabel(instanceID))
+-- Builds a multi-line tooltip string with full spec+loadout details.
+local function GetAssignmentTooltip(instanceID)
+    local asgn = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
+    if not asgn or #asgn == 0 then return nil end
+    local lines = {}
+    for i, pair in ipairs(asgn) do
+        local info = AnySpec.SpecManager:GetSpecInfo(pair.specIndex)
+        local specName = info and info.name or ("Spec " .. pair.specIndex)
+        local loadoutName = "Default loadout"
+        if pair.loadoutID then
+            local cfg = C_Traits.GetConfigInfo(pair.loadoutID)
+            if cfg and cfg.name and cfg.name ~= "" then
+                loadoutName = cfg.name
+            end
+        end
+        tinsert(lines, i .. ".  " .. specName .. "  \124cff888888" .. loadoutName .. "\124r")
+    end
+    return table.concat(lines, "\n")
+end
 
-    local function Refresh()
-        btn:SetText(GetAssignmentLabel(instanceID))
+------------------------------------------------------------
+-- Assignment dialog
+------------------------------------------------------------
+local DIALOG_W        = 374
+local DIALOG_HDR_H    = 34
+local DIALOG_ROW_H    = 34
+local DIALOG_ROW_GAP  = 4
+local DIALOG_PAD      = 12
+local DIALOG_MAX_ROWS = 3
+local ROWS_START_Y    = -(DIALOG_HDR_H + 4)  -- y offset where first row starts
+
+local function GetLoadoutItemsForSpec(specIndex)
+    local items = { { label = "Default loadout", value = nil } }
+    for _, l in ipairs(AnySpec.SpecManager:GetLoadoutsForSpec(specIndex)) do
+        tinsert(items, { label = l.name, value = l.configID })
+    end
+    return items
+end
+
+local function SaveDialogAssignments()
+    print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments called, currentDialogInstID=" .. tostring(currentDialogInstID))
+    if not currentDialogInstID then
+        print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments: no currentDialogInstID")
+        return
+    end
+    local charDB = AnySpec.charDB
+    if not charDB then
+        print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments: charDB not ready")
+        return
     end
 
-    btn:SetScript("OnClick", function(self)
-        local specs   = AnySpec.SpecManager:GetAllSpecs()
-        local charDB  = AnySpec.charDB
-        local cur     = charDB and charDB.instanceAssignments[instanceID]
-        local curSpecs = cur and cur.specs or {}
-        local curSet = {}
-        for _, s in ipairs(curSpecs) do
-            curSet[s] = true
+    local pairs = {}
+    for i, r in ipairs(dialogRows) do
+        local specVal = r.specDD:GetSelected()
+        print("|cff00aaffAnySpec|r [MainFrame] Row " .. i .. ": specVal=" .. tostring(specVal))
+        if specVal then
+            local loadoutVal = r.loadoutDD:GetSelected()
+            print("|cff00aaffAnySpec|r [MainFrame] Row " .. i .. ": adding spec=" .. tostring(specVal) .. ", loadout=" .. tostring(loadoutVal))
+            tinsert(pairs, { specIndex = specVal, loadoutID = loadoutVal })
         end
+    end
 
-        local menuFrame = CreateFrame("Frame", nil, UIParent, "UIDropDownMenuTemplate")
-        local menuList  = {}
-        
-        for _, s in ipairs(specs) do
-            local spec = s
-            tinsert(menuList, {
-                text    = spec.name,
-                icon    = spec.icon,
-                checked = (curSet[spec.specIndex] == true),
-                func    = function()
-                    if curSet[spec.specIndex] then
-                        curSet[spec.specIndex] = nil
-                    else
-                        curSet[spec.specIndex] = true
-                    end
-                    
-                    -- Save the updated list
-                    local newSpecs = {}
-                    for specIdx = 1, 4 do
-                        if curSet[specIdx] then
-                            tinsert(newSpecs, specIdx)
-                        end
-                    end
-                    
-                    if #newSpecs == 0 then
-                        AnySpec.AutoSwitch:ClearAssignment("instance", instanceID)
-                        print("|cff00aaffAnySpec|r: Cleared assignment for instance " .. instanceID)
-                    else
-                        charDB.instanceAssignments[instanceID] = { specs = newSpecs }
-                        print("|cff00aaffAnySpec|r: Assigned specs to instance " .. instanceID .. ": " .. table.concat(newSpecs, ", "))
-                    end
-                    
-                    Refresh()
-                    CloseDropDownMenus()
-                end,
-                isNotRadio = true,
-            })
-        end
-        
-        EasyMenu(menuList, menuFrame, self, 0, 0, "MENU")
+    print("|cff00aaffAnySpec|r [MainFrame] SaveDialogAssignments: " .. #pairs .. " pairs total")
+    if #pairs == 0 then
+        print("|cff00aaffAnySpec|r [MainFrame] Clearing instance " .. tostring(currentDialogInstID))
+        charDB.instanceAssignments[currentDialogInstID] = nil
+    else
+        print("|cff00aaffAnySpec|r [MainFrame] Saving to instance[" .. tostring(currentDialogInstID) .. "]: " .. tostring(pairs))
+        charDB.instanceAssignments[currentDialogInstID] = pairs
+    end
+
+    local fn = instanceRowRefreshFns[currentDialogInstID]
+    if fn then fn() end
+end
+
+local function ResizeDialog()
+    if not assignmentDialog then return end
+    local n = #dialogRows
+    local rowsH  = n > 0 and (n * DIALOG_ROW_H + (n - 1) * DIALOG_ROW_GAP) or 0
+    local totalH = DIALOG_HDR_H + 4 + rowsH + (n > 0 and 6 or 0)
+                   + (n < DIALOG_MAX_ROWS and (8 + 24) or 0) + 10
+    assignmentDialog:SetHeight(math.max(totalH, DIALOG_HDR_H + 4 + 24 + 10))
+
+    -- Reposition Add button
+    local addBtn = assignmentDialog._addBtn
+    if addBtn then
+        addBtn:ClearAllPoints()
+        local addY = ROWS_START_Y - n * (DIALOG_ROW_H + DIALOG_ROW_GAP) - (n > 0 and 2 or 0)
+        addBtn:SetPoint("TOPLEFT", assignmentDialog, "TOPLEFT", DIALOG_PAD, addY - 6)
+        addBtn:SetShown(n < DIALOG_MAX_ROWS)
+    end
+
+    -- Renumber rows
+    for i, r in ipairs(dialogRows) do
+        if r._numLbl then r._numLbl:SetText(tostring(i)) end
+    end
+end
+
+-- Adds one pair row to the open dialog. specIndex may be nil (placeholder).
+local function AddDialogRow(specIndex, loadoutID)
+    print("|cff00aaffAnySpec|r [MainFrame] AddDialogRow: specIndex=" .. tostring(specIndex) .. ", loadoutID=" .. tostring(loadoutID))
+    if not assignmentDialog then
+        print("|cff00aaffAnySpec|r [MainFrame] AddDialogRow: assignmentDialog not ready")
+        return
+    end
+    if #dialogRows >= DIALOG_MAX_ROWS then
+        print("|cff00aaffAnySpec|r [MainFrame] AddDialogRow: max rows reached")
+        return
+    end
+
+    local rowIdx  = #dialogRows + 1
+    local rowTopY = ROWS_START_Y - (rowIdx - 1) * (DIALOG_ROW_H + DIALOG_ROW_GAP)
+
+    local row = CreateFrame("Frame", nil, assignmentDialog, "BackdropTemplate")
+    row:SetSize(DIALOG_W - DIALOG_PAD * 2, DIALOG_ROW_H)
+    row:SetPoint("TOPLEFT", assignmentDialog, "TOPLEFT", DIALOG_PAD, rowTopY)
+    row:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    row:SetBackdropColor(0.11, 0.11, 0.11, 0.6)
+    row:SetBackdropBorderColor(0.25, 0.25, 0.28, 0.8)
+
+    -- Pair number label
+    local numLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    numLbl:SetSize(16, DIALOG_ROW_H)
+    numLbl:SetPoint("LEFT", row, "LEFT", 6, 0)
+    numLbl:SetJustifyH("CENTER")
+    numLbl:SetText(tostring(rowIdx))
+    numLbl:SetTextColor(0.5, 0.5, 0.7)
+    row._numLbl = numLbl
+
+    -- Spec dropdown
+    local specDD = AnySpec.UI.Widgets.CreateCustomDropdown(row, 110)
+    specDD:SetPoint("LEFT", numLbl, "RIGHT", 6, 0)
+    specDD:SetPlaceholder("Select spec…")
+    local specs = AnySpec.SpecManager:GetAllSpecs()
+    local specItems = {}
+    for _, s in ipairs(specs) do
+        tinsert(specItems, { label = s.name, value = s.specIndex, icon = s.icon })
+    end
+    specDD:SetItems(specItems)
+    row.specDD = specDD
+
+    -- Loadout dropdown
+    local loadoutDD = AnySpec.UI.Widgets.CreateCustomDropdown(row, 168)
+    loadoutDD:SetPoint("LEFT", specDD, "RIGHT", 8, 0)
+    loadoutDD:SetPlaceholder("Default loadout")
+    row.loadoutDD = loadoutDD
+
+    -- Wire spec → loadout rebuild
+    specDD:SetOnChanged(function(value, label)
+        loadoutDD:SetItems(GetLoadoutItemsForSpec(value))
+        loadoutDD:ClearSelection()
+        SaveDialogAssignments()
     end)
+    loadoutDD:SetOnChanged(function() SaveDialogAssignments() end)
+
+    -- Remove (✕) button
+    local removeBtn = CreateFrame("Button", nil, row, "UIPanelCloseButton")
+    removeBtn:SetSize(20, 20)
+    removeBtn:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+    removeBtn:SetScript("OnClick", function()
+        row:Hide()
+        row:SetParent(nil)
+        for i = #dialogRows, 1, -1 do
+            if dialogRows[i] == row then
+                tremove(dialogRows, i)
+                break
+            end
+        end
+        -- Re-anchor remaining rows
+        for i, r in ipairs(dialogRows) do
+            local y = ROWS_START_Y - (i - 1) * (DIALOG_ROW_H + DIALOG_ROW_GAP)
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", assignmentDialog, "TOPLEFT", DIALOG_PAD, y)
+        end
+        ResizeDialog()
+        SaveDialogAssignments()
+    end)
+
+    -- Initialise dropdowns with existing values
+    if specIndex then
+        specDD:SetSelected(specIndex)
+        loadoutDD:SetItems(GetLoadoutItemsForSpec(specIndex))
+        if loadoutID ~= nil then
+            loadoutDD:SetSelected(loadoutID)
+        end
+    end
+
+    tinsert(dialogRows, row)
+    ResizeDialog()
+end
+
+local function CreateAssignmentDialog()
+    local d = CreateFrame("Frame", "AnySpecAssignmentDialog", UIParent, "BackdropTemplate")
+    d:SetFrameStrata("DIALOG")
+    d:SetWidth(DIALOG_W)
+    d:SetHeight(DIALOG_HDR_H + 4 + 24 + 10)  -- minimum (no rows)
+    d:SetClampedToScreen(true)
+    d:SetMovable(true)
+    d:RegisterForDrag("LeftButton")
+    d:SetScript("OnDragStart", d.StartMoving)
+    d:SetScript("OnDragStop",  d.StopMovingOrSizing)
+    d:Hide()
+    tinsert(UISpecialFrames, "AnySpecAssignmentDialog")
+
+    d:SetBackdrop({
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    d:SetBackdropColor(0.08, 0.08, 0.08, 0.97)
+    d:SetBackdropBorderColor(0.28, 0.28, 0.32, 1)
+
+    -- Header background
+    local hdrBg = d:CreateTexture(nil, "BACKGROUND", nil, 1)
+    hdrBg:SetPoint("TOPLEFT",  d, "TOPLEFT",  1, -1)
+    hdrBg:SetPoint("TOPRIGHT", d, "TOPRIGHT", -1, -1)
+    hdrBg:SetHeight(DIALOG_HDR_H)
+    hdrBg:SetColorTexture(0.04, 0.04, 0.04, 1)
+
+    -- Title
+    local title = d:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT",  d, "TOPLEFT",  DIALOG_PAD, -7)
+    title:SetPoint("TOPRIGHT", d, "TOPRIGHT", -32, -7)
+    title:SetJustifyH("LEFT")
+    d._title = title
+
+    -- Close (X)
+    local closeBtn = CreateFrame("Button", nil, d, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", d, "TOPRIGHT", 2, -2)
+    closeBtn:SetScript("OnClick", function() d:Hide() end)
+
+    -- Header separator
+    local sep = d:CreateTexture(nil, "ARTWORK")
+    sep:SetHeight(1)
+    sep:SetPoint("TOPLEFT",  d, "TOPLEFT",  1,  -DIALOG_HDR_H)
+    sep:SetPoint("TOPRIGHT", d, "TOPRIGHT", -1, -DIALOG_HDR_H)
+    sep:SetColorTexture(0.28, 0.28, 0.32, 1)
+
+    -- Add button (repositioned by ResizeDialog)
+    local addBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+    addBtn:SetSize(90, 24)
+    addBtn:SetText("+ Add")
+    addBtn:SetPoint("TOPLEFT", d, "TOPLEFT", DIALOG_PAD, ROWS_START_Y - 6)
+    d._addBtn = addBtn
+
+    addBtn:SetScript("OnClick", function()
+        if #dialogRows >= DIALOG_MAX_ROWS then return end
+        local usedSpecs = {}
+        for _, r in ipairs(dialogRows) do
+            local sv = r.specDD:GetSelected()
+            if sv then usedSpecs[sv] = true end
+        end
+        local specs = AnySpec.SpecManager:GetAllSpecs()
+        local defaultSpec = nil
+        for _, s in ipairs(specs) do
+            if not usedSpecs[s.specIndex] then
+                defaultSpec = s.specIndex
+                break
+            end
+        end
+        if not defaultSpec and #specs > 0 then defaultSpec = specs[1].specIndex end
+        AddDialogRow(defaultSpec, nil)
+        SaveDialogAssignments()
+    end)
+
+    d:Hide()
+    return d
+end
+
+-- Opens (or re-populates) the assignment dialog for the given instance.
+local function OpenAssignmentDialog(instanceID, instanceName)
+    print("|cff00aaffAnySpec|r [MainFrame] OpenAssignmentDialog: instanceID=" .. tostring(instanceID) .. ", name=" .. tostring(instanceName))
+    if not assignmentDialog then
+        print("|cff00aaffAnySpec|r [MainFrame] assignmentDialog not created")
+        return
+    end
+
+    -- Clear old rows
+    for _, r in ipairs(dialogRows) do
+        r:Hide()
+        r:SetParent(nil)
+    end
+    wipe(dialogRows)
+
+    currentDialogInstID = instanceID
+    assignmentDialog._title:SetText(instanceName or "Instance")
+
+    -- Populate from saved data
+    local saved = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
+    print("|cff00aaffAnySpec|r [MainFrame] OpenAssignmentDialog: saved data for instance[" .. tostring(instanceID) .. "] = " .. tostring(saved))
+    if saved and #saved > 0 then
+        print("|cff00aaffAnySpec|r [MainFrame] Loading " .. #saved .. " saved assignments")
+        for i, pair in ipairs(saved) do
+            print("|cff00aaffAnySpec|r [MainFrame] Pair " .. i .. ": spec=" .. tostring(pair.specIndex) .. ", loadout=" .. tostring(pair.loadoutID))
+            AddDialogRow(pair.specIndex, pair.loadoutID)
+        end
+    else
+        print("|cff00aaffAnySpec|r [MainFrame] No saved assignments found")
+    end
+
+    ResizeDialog()
+
+    -- Centre near the main frame if open, otherwise screen centre
+    assignmentDialog:ClearAllPoints()
+    if frame and frame:IsShown() then
+        assignmentDialog:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    else
+        assignmentDialog:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+    assignmentDialog:Show()
+end
+
+------------------------------------------------------------
+-- Per-instance row button (opens the dialog)
+------------------------------------------------------------
+local function CreateAssignButton(parent, instanceID, instanceName, width)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(width, 22)
+
+    local function Refresh()
+        btn:SetText(GetAssignmentSummary(instanceID))
+    end
+    instanceRowRefreshFns[instanceID] = Refresh
+    Refresh()
+
+    btn:SetScript("OnClick", function()
+        OpenAssignmentDialog(instanceID, instanceName)
+    end)
+
+    btn:SetScript("OnEnter", function(self)
+        local tip = GetAssignmentTooltip(instanceID)
+        if tip then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(instanceName or "", 1, 1, 1)
+            GameTooltip:AddLine(tip, 0.8, 0.8, 0.8, false)
+            GameTooltip:Show()
+        end
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     return btn
 end
@@ -243,6 +536,7 @@ local function RebuildInstanceList(tierIndex, isRaid)
         row:Hide()
     end
     instanceRows = {}
+    wipe(instanceRowRefreshFns)
     if scrollChild._emptyLabel then
         scrollChild._emptyLabel:SetParent(nil)
         scrollChild._emptyLabel = nil
@@ -262,11 +556,7 @@ local function RebuildInstanceList(tierIndex, isRaid)
     -- Ensure we have a valid width; if not, estimate based on scrollFrame
     if rowW == 0 or rowW < 100 then
         rowW = (scrollFrame:GetWidth() or 400) - 4
-        print("|cff00aaffAnySpec|r: DEBUG - Estimated scrollChild width to " .. rowW)
     end
-    
-    print("|cff00aaffAnySpec|r: DEBUG - Rebuilding instance list for " .. (isRaid and "raids" or "dungeons") 
-        .. " (tier " .. tierIndex .. "), found " .. #instances .. " instances, width=" .. rowW)
     
     local y           = -6
     local filteredCount = 0
@@ -307,14 +597,12 @@ local function RebuildInstanceList(tierIndex, isRaid)
             lbl:SetText(inst.name)
 
             -- Spec assignment button
-            local ab = CreateAssignButton(row, inst.id, BTN_WIDTH)
+            local ab = CreateAssignButton(row, inst.id, inst.name, BTN_WIDTH)
             ab:SetPoint("RIGHT", row, "RIGHT", -6, 0)
             ab:SetPoint("CENTER", row, "CENTER", (BTN_WIDTH / 2 + 6), 0)
 
             y = y - ROW_H
             tinsert(instanceRows, row)
-        else
-            print("|cff00aaffAnySpec|r: DEBUG - Skipping open world boss: " .. inst.name)
         end
     end
 
@@ -327,8 +615,6 @@ local function RebuildInstanceList(tierIndex, isRaid)
         empty:SetText("No instances for this combination.")
         scrollChild._emptyLabel = empty
     end
-    
-    print("|cff00aaffAnySpec|r: DEBUG - Instance list rebuilt, " .. filteredCount .. " instances shown, scrollChild height=" .. scrollChild:GetHeight())
 end
 
 -- Called whenever the tab or tier changes.
@@ -442,7 +728,6 @@ local function BuildRightPanel(parent)
         local newW = w - 4
         if scrollChild:GetWidth() ~= newW then
             scrollChild:SetWidth(newW)
-            print("|cff00aaffAnySpec|r: DEBUG - ScrollFrame resized to " .. w .. ", setting scrollChild width to " .. newW)
             -- Rebuild rows if we already loaded data (width changed = frame first shown)
             if currentTierIdx then
                 RefreshInstanceList()
@@ -533,12 +818,8 @@ local function CreateMainFrame()
     leftPanel:SetWidth(LEFT_W - 4)  -- Account for scrollbar
     leftPanelScroll:SetScrollChild(leftPanel)
 
-    print("|cff00aaffAnySpec|r: DEBUG - Left panel scroll created, initial width=" .. leftPanel:GetWidth())
-    
     -- Now build the content into leftPanel
     local y = -14
-    
-    print("|cff00aaffAnySpec|r: DEBUG - BuildLeftPanel: panel width=" .. leftPanel:GetWidth())
 
     -- ── Quick Access ──────────────────────────────────────
     local hdr = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -571,15 +852,12 @@ local function CreateMainFrame()
             return AcquireMacro("switch", "AnySpec", switchIcon, "ANYSPEC_SWITCH")
         end)
     switchDrag:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
-    print("|cff00aaffAnySpec|r: DEBUG - Switch button at y=" .. y)
     y = y - 32
 
     -- Per-spec drag buttons
     local specs = AnySpec.SpecManager:GetAllSpecs()
-    print("|cff00aaffAnySpec|r: DEBUG - Found " .. #specs .. " specs")
     for i, spec in ipairs(specs) do
         local s = spec
-        print("|cff00aaffAnySpec|r: DEBUG - Creating button for spec " .. s.specIndex .. ": " .. s.name .. " at y=" .. y)
         local btn = CreateDragButton(leftPanel, s.icon, s.name,
             "Switch directly to " .. s.name .. ".", function()
                 return AcquireMacro("spec" .. s.specIndex, s.name, s.icon, "ANYSPEC_SPEC" .. s.specIndex)
@@ -594,7 +872,6 @@ local function CreateMainFrame()
     local hdr2 = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     hdr2:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
     hdr2:SetText("Settings")
-    print("|cff00aaffAnySpec|r: DEBUG - Settings section at y=" .. y)
     y = y - 24
 
     -- Helper to build a checkbox
@@ -625,7 +902,6 @@ local function CreateMainFrame()
     
     -- Set scroll child height
     leftPanel:SetHeight(math.abs(y) + 20)
-    print("|cff00aaffAnySpec|r: DEBUG - Left panel content height set to " .. leftPanel:GetHeight())
 
     -- Vertical divider
     local vSep = f:CreateTexture(nil, "ARTWORK")
@@ -642,9 +918,6 @@ local function CreateMainFrame()
 
     -- ── OnShow: restore position, init tiers, select tab ─
     f:SetScript("OnShow", function(self)
-        print("|cff00aaffAnySpec|r: DEBUG - MainFrame OnShow: frame width=" .. self:GetWidth() .. ", height=" .. self:GetHeight())
-        print("|cff00aaffAnySpec|r: DEBUG - Left panel should be: width=" .. LEFT_W .. ", right panel: width=" .. (FRAME_W - LEFT_W - DIVIDER_W))
-        
         -- Restore saved position if available
         if AnySpec.db and AnySpec.db.framePosition then
             local pos = AnySpec.db.framePosition
@@ -672,6 +945,7 @@ end
 ------------------------------------------------------------
 function MF:Init()
     frame = CreateMainFrame()
+    assignmentDialog = CreateAssignmentDialog()
 end
 
 function MF:Toggle()

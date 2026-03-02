@@ -10,6 +10,7 @@ Core.lua
 SpecManager.lua
 ZoneDetector.lua
 AutoSwitch.lua
+UI\Widgets.lua
 UI\MinimapButton.lua
 UI\MainFrame.lua
 UI\QuickSwitch.lua

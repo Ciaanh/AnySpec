@@ -1,196 +1,407 @@
 -- AnySpec/UI/Proposal.lua
--- Auto-switch proposal toast shown when entering configured content
+-- Multi-option spec/loadout proposal toast shown on instance entry.
+-- Up to 3 spec+loadout pairs are shown as clickable rows with keyboard shortcuts
+-- and a countdown timer bar. Timeout fades silently with no dismiss cooldown.
 
-AnySpec = AnySpec or {}
+AnySpec    = AnySpec    or {}
 AnySpec.UI = AnySpec.UI or {}
 AnySpec.UI.Proposal = AnySpec.UI.Proposal or {}
 local PR = AnySpec.UI.Proposal
 
-local TOAST_WIDTH = 340
-local TOAST_HEIGHT = 72
-local FADE_DURATION = 0.3
-local PROPOSAL_TIMEOUT = 5
+------------------------------------------------------------
+-- Layout constants
+------------------------------------------------------------
+local TOAST_W          = 360
+local PADDING          = 10
+local HEADER_H         = 26
+local SEP_H            = 1
+local ROW_H            = 50
+local ROW_GAP          = 3
+local TIMER_H          = 4
+local HINT_H           = 18
+local FADE_DURATION    = 0.25
+local PROPOSAL_TIMEOUT = 8      -- seconds; expiry does NOT set dismiss cooldown
 
-local toast = nil
-local dismissTimer = nil
-local currentAssignment = nil
-local currentZoneInfo = nil
+------------------------------------------------------------
+-- Module state
+------------------------------------------------------------
+local toast              = nil
+local proposalRows       = {}   -- row frames created per Show()
+local currentAssignments = nil  -- array of { specIndex, loadoutID }
+local currentZoneInfo    = nil
 
-local function CancelDismissTimer()
-    if dismissTimer then
-        dismissTimer:Cancel()
-        dismissTimer = nil
+-- Unified per-frame state (timer + fade share one OnUpdate)
+local state = {
+    timerRunning   = false,
+    timerElapsed   = 0,
+    fadeActive     = false,
+    fadeDirection  = 1,     -- 1 = fade-in, -1 = fade-out
+    fadeElapsed    = 0,
+    onFadeOutDone  = nil,
+}
+
+------------------------------------------------------------
+-- Helpers
+------------------------------------------------------------
+local function ClearRows()
+    for _, row in ipairs(proposalRows) do
+        row:Hide()
+        row:SetParent(nil)
+    end
+    wipe(proposalRows)
+end
+
+local function SetRowsEnabled(enabled)
+    for _, row in ipairs(proposalRows) do
+        row:EnableMouse(enabled)
     end
 end
 
+local function StartFadeIn()
+    state.fadeActive   = true
+    state.fadeDirection = 1
+    state.fadeElapsed  = 0
+    state.onFadeOutDone = nil
+    toast:SetAlpha(0)
+    toast:Show()
+end
+
+local function StartFadeOut(onDone)
+    state.fadeActive   = true
+    state.fadeDirection = -1
+    state.fadeElapsed  = 0
+    state.onFadeOutDone = onDone
+end
+
+------------------------------------------------------------
+-- Toast frame (shell only; rows added per Show)
+------------------------------------------------------------
 local function CreateToast()
     local f = CreateFrame("Frame", "AnySpecProposalToast", UIParent, "BackdropTemplate")
-    f:SetSize(TOAST_WIDTH, TOAST_HEIGHT)
-    f:SetPoint("TOP", UIParent, "TOP", 0, -80)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
     f:Hide()
 
     f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
         tile = true, tileSize = 32, edgeSize = 16,
         insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
 
-    -- Spec icon
-    local specIcon = f:CreateTexture(nil, "ARTWORK")
-    specIcon:SetSize(48, 48)
-    specIcon:SetPoint("LEFT", f, "LEFT", 10, 0)
-    specIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    f._specIcon = specIcon
+    -- Instance name header
+    local header = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    header:SetPoint("TOPLEFT",  f, "TOPLEFT",  PADDING, -PADDING)
+    header:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADDING, -PADDING)
+    header:SetJustifyH("LEFT")
+    f._header = header
 
-    -- Proposal text
-    local text = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    text:SetPoint("LEFT", specIcon, "RIGHT", 8, 6)
-    text:SetPoint("RIGHT", f, "RIGHT", -10, 0)
-    text:SetJustifyH("LEFT")
-    text:SetWordWrap(true)
-    f._text = text
+    -- Separator below header
+    local sep = f:CreateTexture(nil, "ARTWORK")
+    sep:SetHeight(SEP_H)
+    sep:SetPoint("TOPLEFT",  f, "TOPLEFT",  PADDING,  -(PADDING + HEADER_H + 2))
+    sep:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADDING, -(PADDING + HEADER_H + 2))
+    sep:SetColorTexture(0.3, 0.3, 0.35, 0.8)
 
-    -- Content sub-text
-    local subText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    subText:SetPoint("LEFT", specIcon, "RIGHT", 8, -10)
-    subText:SetPoint("RIGHT", f, "RIGHT", -10, 0)
-    subText:SetJustifyH("LEFT")
-    subText:SetTextColor(0.7, 0.7, 0.7)
-    f._subText = subText
+    -- Timer bar background
+    local timerBg = f:CreateTexture(nil, "ARTWORK")
+    timerBg:SetHeight(TIMER_H)
+    timerBg:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  PADDING,  PADDING)
+    timerBg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -PADDING, PADDING)
+    timerBg:SetColorTexture(0.15, 0.15, 0.15, 0.6)
+    f._timerBg = timerBg
 
-    -- Switch button
-    local switchBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    switchBtn:SetSize(80, 22)
-    switchBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 62, 8)
-    switchBtn:SetText("Switch")
-    switchBtn:SetScript("OnClick", function()
-        PR:OnAccept()
+    -- Timer bar fill (shrinks left→right as time runs out)
+    local timerFill = f:CreateTexture(nil, "OVERLAY")
+    timerFill:SetHeight(TIMER_H)
+    timerFill:SetPoint("TOPLEFT",    timerBg, "TOPLEFT",    0, 0)
+    timerFill:SetPoint("BOTTOMLEFT", timerBg, "BOTTOMLEFT", 0, 0)
+    timerFill:SetColorTexture(0.05, 0.65, 1, 0.85)
+    f._timerFill = timerFill
+
+    -- Hint text (only shown when 2+ rows)
+    local hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hint:SetPoint("BOTTOM", f, "BOTTOM", 0, PADDING + TIMER_H + 4)
+    hint:SetJustifyH("CENTER")
+    hint:SetTextColor(0.4, 0.4, 0.4)
+    hint:Hide()
+    f._hint = hint
+
+    -- Keyboard handling
+    f:EnableKeyboard(false)
+    f:SetScript("OnKeyDown", function(self, key)
+        local handled = false
+        if key == "ESCAPE" then
+            PR:OnDismiss()
+            handled = true
+        elseif tonumber(key) then
+            local idx = tonumber(key)
+            if currentAssignments and idx >= 1 and idx <= #currentAssignments then
+                PR:OnAccept(idx)
+                handled = true
+            end
+        end
+        self:SetPropagateKeyboardInput(not handled)
     end)
-    f._switchBtn = switchBtn
 
-    -- Dismiss button
-    local dismissBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    dismissBtn:SetSize(80, 22)
-    dismissBtn:SetPoint("LEFT", switchBtn, "RIGHT", 6, 0)
-    dismissBtn:SetText("Dismiss")
-    dismissBtn:SetScript("OnClick", function()
-        PR:OnDismiss()
+    -- Unified OnUpdate: fade-in/out + countdown timer
+    f:SetScript("OnUpdate", function(self, dt)
+        -- Fade
+        if state.fadeActive then
+            state.fadeElapsed = state.fadeElapsed + dt
+            local prog = math.min(state.fadeElapsed / FADE_DURATION, 1)
+            self:SetAlpha(state.fadeDirection == 1 and prog or (1 - prog))
+            if prog >= 1 then
+                state.fadeActive = false
+                if state.fadeDirection == -1 then
+                    self:Hide()
+                    self:SetAlpha(1)
+                    if state.onFadeOutDone then
+                        state.onFadeOutDone()
+                        state.onFadeOutDone = nil
+                    end
+                end
+            end
+        end
+
+        -- Timer bar
+        if not state.timerRunning then return end
+        state.timerElapsed = state.timerElapsed + dt
+        local fraction = 1 - math.min(state.timerElapsed / PROPOSAL_TIMEOUT, 1)
+        local barW = self._timerBg:GetWidth() or (TOAST_W - PADDING * 2)
+        self._timerFill:SetWidth(math.max(0.1, barW * fraction))
+
+        if state.timerElapsed >= PROPOSAL_TIMEOUT then
+            state.timerRunning = false
+            PR:_HideNoCD()  -- expired: no dismiss cooldown
+        end
     end)
-    f._dismissBtn = dismissBtn
 
+    f:Hide()
     return f
 end
 
-local function FadeIn(frame)
-    frame:SetAlpha(0)
-    frame:Show()
-    local elapsed = 0
-    frame:SetScript("OnUpdate", function(self, dt)
-        elapsed = elapsed + dt
-        local alpha = elapsed / FADE_DURATION
-        if alpha >= 1 then
-            alpha = 1
-            self:SetScript("OnUpdate", nil)
+------------------------------------------------------------
+-- Build per-show spec+loadout rows
+------------------------------------------------------------
+local function BuildRows(assignments)
+    ClearRows()
+
+    local currentSpec    = AnySpec.SpecManager:GetCurrentSpecIndex()
+    local rowsTopOffset  = PADDING + HEADER_H + SEP_H + 8
+
+    for i, a in ipairs(assignments) do
+        local specInfo = AnySpec.SpecManager:GetSpecInfo(a.specIndex)
+        if specInfo then
+            -- Resolve loadout display name
+            local loadoutName = nil
+            if a.loadoutID then
+                local cfg = C_Traits.GetConfigInfo(a.loadoutID)
+                if cfg then loadoutName = cfg.name end
+            end
+
+            local isCurrent = (currentSpec == a.specIndex)
+
+            local row = CreateFrame("Button", nil, toast)
+            row:SetSize(TOAST_W - PADDING * 2, ROW_H)
+            row:SetPoint("TOPLEFT", toast, "TOPLEFT", PADDING,
+                         -(rowsTopOffset + (i - 1) * (ROW_H + ROW_GAP)))
+            row:RegisterForClicks("LeftButtonUp")
+
+            -- Green tint for the row matching current spec
+            if isCurrent then
+                local rowBg = row:CreateTexture(nil, "BACKGROUND")
+                rowBg:SetAllPoints()
+                rowBg:SetColorTexture(0.07, 0.32, 0.07, 0.4)
+            end
+
+            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+
+            -- Number badge
+            local badge = row:CreateTexture(nil, "BACKGROUND")
+            badge:SetSize(22, 22)
+            badge:SetPoint("LEFT", row, "LEFT", 4, 0)
+            badge:SetColorTexture(0.12, 0.12, 0.12, 0.9)
+
+            local numLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+            numLbl:SetSize(22, 22)
+            numLbl:SetPoint("CENTER", badge, "CENTER", 0, 0)
+            numLbl:SetText(tostring(i))
+            numLbl:SetTextColor(0.6, 0.6, 1)
+
+            -- Spec icon
+            local ico = row:CreateTexture(nil, "ARTWORK")
+            ico:SetSize(32, 32)
+            ico:SetPoint("LEFT", row, "LEFT", 30, 0)
+            ico:SetTexture(specInfo.icon)
+            ico:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+            -- Spec name (green when current)
+            local specNameLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            specNameLbl:SetPoint("TOPLEFT",  ico, "TOPRIGHT",  8, -3)
+            specNameLbl:SetPoint("TOPRIGHT", row, "TOPRIGHT", -28, -3)
+            specNameLbl:SetJustifyH("LEFT")
+            specNameLbl:SetText(specInfo.name)
+            specNameLbl:SetTextColor(isCurrent and 0.2 or 1, isCurrent and 1 or 1, isCurrent and 0.2 or 1)
+
+            -- Loadout name (smaller, dimmer)
+            local loadoutLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            loadoutLbl:SetPoint("BOTTOMLEFT",  ico, "BOTTOMRIGHT",  8, 4)
+            loadoutLbl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -28, 4)
+            loadoutLbl:SetJustifyH("LEFT")
+            if loadoutName and loadoutName ~= "" then
+                loadoutLbl:SetText(loadoutName)
+                loadoutLbl:SetTextColor(0.62, 0.62, 0.62)
+            else
+                loadoutLbl:SetText("Default loadout")
+                loadoutLbl:SetTextColor(0.35, 0.35, 0.35)
+            end
+
+            -- Checkmark for current spec
+            if isCurrent then
+                local check = row:CreateTexture(nil, "OVERLAY")
+                check:SetSize(16, 16)
+                check:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+                check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+            end
+
+            local rowIdx = i
+            row:SetScript("OnClick", function() PR:OnAccept(rowIdx) end)
+
+            tinsert(proposalRows, row)
         end
-        self:SetAlpha(alpha)
-    end)
+    end
 end
 
-local function FadeOut(frame, onComplete)
-    local elapsed = 0
-    local startAlpha = frame:GetAlpha()
-    frame:SetScript("OnUpdate", function(self, dt)
-        elapsed = elapsed + dt
-        local alpha = startAlpha * (1 - elapsed / FADE_DURATION)
-        if alpha <= 0 then
-            alpha = 0
-            self:SetScript("OnUpdate", nil)
-            self:Hide()
-            if onComplete then onComplete() end
-        end
-        self:SetAlpha(alpha)
-    end)
-end
-
+------------------------------------------------------------
+-- Public API
+------------------------------------------------------------
 function PR:Init()
     toast = CreateToast()
 end
 
-function PR:Show(assignment, zoneInfo)
-    if not toast then return end
-
-    currentAssignment = assignment
-    currentZoneInfo = zoneInfo
-
-    local specInfo = AnySpec.SpecManager:GetSpecInfo(assignment.specIndex)
-    if not specInfo then return end
-
-    toast._specIcon:SetTexture(specInfo.icon)
-    toast._text:SetText("Switch to |cffffffff" .. specInfo.name .. "|r?")
-    toast._subText:SetText(zoneInfo.instanceName or zoneInfo.category or "")
-
-    CancelDismissTimer()
-
-    dismissTimer = C_Timer.NewTimer(PROPOSAL_TIMEOUT, function()
-        PR:OnDismiss()
-    end)
-
-    FadeIn(toast)
-end
-
-function PR:Hide()
-    CancelDismissTimer()
-    if toast and toast:IsShown() then
-        FadeOut(toast)
+-- assignments = array of { specIndex, loadoutID }
+function PR:Show(assignments, zoneInfo)
+    print("|cff00aaffAnySpec|r [Proposal] Show: assignments=" .. tostring(assignments) .. ", count=" .. (assignments and #assignments or 0) .. ", zone=" .. tostring(zoneInfo and zoneInfo.instanceID))
+    if not toast then
+        print("|cff00aaffAnySpec|r [Proposal] Show: toast not initialized")
+        return
     end
-end
-
-function PR:OnAccept()
-    CancelDismissTimer()
-    if not currentAssignment then return end
-
-    local ok, err = AnySpec.SpecManager:SwitchSpec(
-        currentAssignment.specIndex,
-        currentAssignment.loadoutID
-    )
-
-    if not ok then
-        toast._text:SetText("|cffff4444" .. (err or "Switch failed.") .. "|r")
-        C_Timer.After(2, function() PR:Hide() end)
+    if not assignments or #assignments == 0 then
+        print("|cff00aaffAnySpec|r [Proposal] Show: no assignments")
         return
     end
 
-    -- Show a brief progress indicator; PLAYER_SPECIALIZATION_CHANGED will confirm
-    toast._switchBtn:SetEnabled(false)
-    toast._dismissBtn:SetEnabled(false)
-    toast._text:SetText("Switching...")
+    currentAssignments = assignments
+    currentZoneInfo    = zoneInfo
 
-    -- Auto-close after a few seconds regardless
-    C_Timer.After(5, function() PR:Hide() end)
+    local numRows  = #assignments
+    local showHint = (numRows >= 2)
 
-    currentAssignment = nil
-    currentZoneInfo = nil
+    -- Toast height
+    local rowsH  = numRows * ROW_H + math.max(0, numRows - 1) * ROW_GAP
+    local hintH  = showHint and (HINT_H + 4) or 0
+    local totalH = PADDING + HEADER_H + SEP_H + 8 + rowsH + 8 + hintH + TIMER_H + PADDING
+    toast:SetSize(TOAST_W, totalH)
+    toast:SetPoint("TOP", UIParent, "TOP", 0, -80)
+
+    toast._header:SetText(zoneInfo.instanceName or zoneInfo.category or "")
+
+    BuildRows(assignments)
+
+    if showHint then
+        local keys = {}
+        for i = 1, numRows do tinsert(keys, tostring(i)) end
+        toast._hint:SetText("Press " .. table.concat(keys, "-") .. " or click  ·  ESC to dismiss")
+        toast._hint:Show()
+    else
+        toast._hint:Hide()
+    end
+
+    -- Start timer bar at full width
+    state.timerElapsed = 0
+    state.timerRunning = true
+    toast._timerFill:SetWidth(TOAST_W - PADDING * 2)
+
+    toast:EnableKeyboard(true)
+    StartFadeIn()
 end
 
+-- User picked option at position idx
+function PR:OnAccept(idx)
+    if not currentAssignments or not currentAssignments[idx] then return end
+
+    state.timerRunning = false
+    toast:EnableKeyboard(false)
+    SetRowsEnabled(false)
+
+    -- Dim non-chosen rows
+    for i, row in ipairs(proposalRows) do
+        if i ~= idx then row:SetAlpha(0.3) end
+    end
+
+    local chosen   = currentAssignments[idx]
+    local specInfo = AnySpec.SpecManager:GetSpecInfo(chosen.specIndex)
+    local label    = specInfo and specInfo.name or ("Spec " .. chosen.specIndex)
+
+    local ok, err = AnySpec.SpecManager:SwitchSpec(chosen.specIndex, chosen.loadoutID)
+
+    if not ok then
+        toast._header:SetText("|cffff4444" .. (err or "Switch failed.") .. "|r")
+        SetRowsEnabled(true)
+        toast:EnableKeyboard(true)
+        state.timerElapsed = 0
+        state.timerRunning = true
+        return
+    end
+
+    toast._header:SetText("Switching to " .. label .. "…")
+    currentAssignments = nil
+    currentZoneInfo    = nil
+    C_Timer.After(3, function()
+        if toast:IsShown() then PR:_HideNoCD() end
+    end)
+end
+
+-- Explicit dismiss: sets cooldown so proposal won't re-appear for 60 s
 function PR:OnDismiss()
-    CancelDismissTimer()
-    if currentAssignment and currentZoneInfo then
-        AnySpec.AutoSwitch:OnProposalDismissed(currentZoneInfo, currentAssignment.specIndex)
-    end
-    currentAssignment = nil
-    currentZoneInfo = nil
-    if toast and toast:IsShown() then
-        FadeOut(toast)
-    end
+    if not toast or not toast:IsShown() then return end
+    PR:_HideWithCD()
 end
 
+-- Hide and record dismiss cooldown (user explicitly dismissed)
+function PR:_HideWithCD()
+    state.timerRunning = false
+    if currentZoneInfo then
+        AnySpec.AutoSwitch:OnProposalDismissed(currentZoneInfo)
+    end
+    currentAssignments = nil
+    currentZoneInfo    = nil
+    toast:EnableKeyboard(false)
+    if toast:IsShown() then StartFadeOut(nil) end
+end
+
+-- Hide without cooldown (timer expiry)
+function PR:_HideNoCD()
+    state.timerRunning = false
+    currentAssignments = nil
+    currentZoneInfo    = nil
+    toast:EnableKeyboard(false)
+    if toast:IsShown() then StartFadeOut(nil) end
+end
+
+-- Called externally (e.g. combat start): hide silently, no dismiss cooldown.
+function PR:Hide()
+    if not toast or not toast:IsShown() then return end
+    self:_HideNoCD()
+end
+
+-- Called when combat starts while toast is visible
 function PR:OnSpecSwitchFailed()
     if not toast or not toast:IsShown() then return end
-    toast._text:SetText("|cffff4444Spec switch failed.|r")
-    toast._switchBtn:SetEnabled(true)
-    toast._dismissBtn:SetEnabled(true)
-    C_Timer.After(3, function() PR:Hide() end)
+    toast._header:SetText("|cffff4444Spec switch failed.|r")
+    SetRowsEnabled(true)
+    toast:EnableKeyboard(true)
+    state.timerElapsed = 0
+    state.timerRunning = true
 end

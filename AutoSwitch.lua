@@ -38,17 +38,16 @@ function AS_MOD:OnPlayerLogin()
     -- Initial zone check is handled via ZoneDetector -> OnZoneChanged
 end
 
--- Called by ZoneDetector whenever the zone changes
+-- Called by ZoneDetector whenever the zone changes.
 function AS_MOD:OnZoneChanged(zoneInfo)
-    if not AnySpec.db or not AnySpec.db.proposalEnabled then 
-        print("|cff00aaffAnySpec|r: DEBUG - Zone changed but proposals disabled")
-        return 
+    print("|cff00aaffAnySpec|r [AutoSwitch] OnZoneChanged: " .. tostring(zoneInfo.instanceID) .. " (" .. tostring(zoneInfo.category) .. ")")
+    if not AnySpec.db or not AnySpec.db.proposalEnabled then
+        print("|cff00aaffAnySpec|r [AutoSwitch] proposal disabled or db not ready")
+        return
     end
 
-    print("|cff00aaffAnySpec|r: DEBUG - Zone changed: " .. tostring(zoneInfo.category))
-
     if InCombatLockdown() then
-        print("|cff00aaffAnySpec|r: DEBUG - In combat, queueing zone change proposal")
+        print("|cff00aaffAnySpec|r [AutoSwitch] in combat, queueing zone info")
         pendingZoneInfo = zoneInfo
         return
     end
@@ -57,135 +56,131 @@ function AS_MOD:OnZoneChanged(zoneInfo)
 end
 
 -- Look up the assignment for the given zone using the resolution hierarchy.
--- Returns { specIndex = ..., loadoutID = ..., specs = { ... } } or nil
+-- Returns an array of { specIndex, loadoutID } pairs, or nil when nothing is configured.
+-- Category/difficulty assignments are wrapped in a single-element array for consistency.
 function AS_MOD:GetAssignment(zoneInfo)
     local charDB = AnySpec.charDB
-    if not charDB then return nil end
+    if not charDB then
+        print("|cff00aaffAnySpec|r [AutoSwitch] GetAssignment: charDB not ready")
+        return nil
+    end
 
-    local instanceID = zoneInfo.instanceID
+    local instanceID   = zoneInfo.instanceID
     local difficultyID = zoneInfo.difficultyID
-    local category = zoneInfo.category
+    local category     = zoneInfo.category
+    print("|cff00aaffAnySpec|r [AutoSwitch] GetAssignment: instanceID=" .. tostring(instanceID) .. ", difficultyID=" .. tostring(difficultyID) .. ", category=" .. tostring(category))
 
-    print("|cff00aaffAnySpec|r: DEBUG - GetAssignment for zone: category=" .. tostring(category) 
-        .. ", instanceID=" .. tostring(instanceID) .. ", difficultyID=" .. tostring(difficultyID))
-
-    -- Most specific to least specific
+    -- Most specific: per-instance + per-difficulty
     if instanceID and difficultyID then
         local key = instanceID .. ":" .. difficultyID
-        if charDB.instanceDifficultyAssignments[key] then
-            print("|cff00aaffAnySpec|r: DEBUG - Found instanceDiffi assignment for " .. key)
-            return charDB.instanceDifficultyAssignments[key]
+        local a = charDB.instanceDifficultyAssignments[key]
+        print("|cff00aaffAnySpec|r [AutoSwitch] checking instanceDifficulty[" .. key .. "]: " .. tostring(a))
+        if a then
+            return (type(a[1]) == "table") and a or { a }
         end
     end
 
+    -- Per-instance (array of {specIndex, loadoutID} pairs)
     if instanceID then
-        local assignment = charDB.instanceAssignments[instanceID]
-        if assignment then
-            print("|cff00aaffAnySpec|r: DEBUG - Found instance assignment for " .. instanceID)
-            -- Handle new multi-spec format: { specs = { 1, 2, 3 } }
-            if assignment.specs then
-                if #assignment.specs > 0 then
-                    -- Return assignment with specIndex set to the first spec
-                    return {
-                        specIndex = assignment.specs[1],
-                        loadoutID = assignment.loadoutID,
-                        specs = assignment.specs,
-                    }
-                end
-            elseif assignment.specIndex then
-                -- Old single-spec format: { specIndex = ..., loadoutID = ... }
-                return assignment
-            end
+        local a = charDB.instanceAssignments[instanceID]
+        print("|cff00aaffAnySpec|r [AutoSwitch] checking instance[" .. tostring(instanceID) .. "]: " .. tostring(a))
+        if a and #a > 0 then
+            return a
         end
     end
 
+    -- Per-category + difficulty
     if category and difficultyID then
         local key = category .. ":" .. difficultyID
-        if charDB.difficultyAssignments[key] then
-            print("|cff00aaffAnySpec|r: DEBUG - Found categoryDifficulty assignment for " .. key)
-            return charDB.difficultyAssignments[key]
+        local a = charDB.difficultyAssignments[key]
+        print("|cff00aaffAnySpec|r [AutoSwitch] checking categoryDifficulty[" .. key .. "]: " .. tostring(a))
+        if a then
+            return (type(a[1]) == "table") and a or { a }
         end
     end
 
+    -- Per-category fallback
     if category then
-        if charDB.categoryAssignments[category] then
-            print("|cff00aaffAnySpec|r: DEBUG - Found category assignment for " .. category)
-            return charDB.categoryAssignments[category]
+        local a = charDB.categoryAssignments[category]
+        print("|cff00aaffAnySpec|r [AutoSwitch] checking category[" .. tostring(category) .. "]: " .. tostring(a))
+        if a then
+            return (type(a[1]) == "table") and a or { a }
         end
     end
 
-    print("|cff00aaffAnySpec|r: DEBUG - No assignment found")
+    print("|cff00aaffAnySpec|r [AutoSwitch] GetAssignment: no matches found")
     return nil
 end
 
--- Save an assignment. level is one of: "category", "difficulty", "instance", "instanceDifficulty"
-function AS_MOD:SetAssignment(level, key, specIndex, loadoutID)
+-- Save instance assignments.
+-- pairs is an array of { specIndex, loadoutID }; pass nil or {} to clear.
+function AS_MOD:SetInstanceAssignment(instanceID, pairs)
     local charDB = AnySpec.charDB
     if not charDB then return end
-
-    local entry = { specIndex = specIndex, loadoutID = loadoutID or nil }
-
-    if level == "category" then
-        charDB.categoryAssignments[key] = entry
-    elseif level == "difficulty" then
-        charDB.difficultyAssignments[key] = entry
-    elseif level == "instance" then
-        charDB.instanceAssignments[key] = entry
-    elseif level == "instanceDifficulty" then
-        charDB.instanceDifficultyAssignments[key] = entry
+    if not pairs or #pairs == 0 then
+        charDB.instanceAssignments[instanceID] = nil
+    else
+        charDB.instanceAssignments[instanceID] = pairs
     end
 end
 
-function AS_MOD:ClearAssignment(level, key)
+function AS_MOD:ClearInstanceAssignment(instanceID)
     local charDB = AnySpec.charDB
     if not charDB then return end
-
-    if level == "category" then
-        charDB.categoryAssignments[key] = nil
-    elseif level == "difficulty" then
-        charDB.difficultyAssignments[key] = nil
-    elseif level == "instance" then
-        charDB.instanceAssignments[key] = nil
-    elseif level == "instanceDifficulty" then
-        charDB.instanceDifficultyAssignments[key] = nil
-    end
+    charDB.instanceAssignments[instanceID] = nil
 end
 
--- Evaluate whether a proposal should be shown for the current zone
+-- Evaluate whether a proposal should be shown for the current zone.
 function AS_MOD:EvaluateAndPropose(zoneInfo)
-    local assignment = self:GetAssignment(zoneInfo)
-    if not assignment then 
-        print("|cff00aaffAnySpec|r: DEBUG - No assignment for zone, skipping proposal")
-        return 
+    local assignments = self:GetAssignment(zoneInfo)
+    print("|cff00aaffAnySpec|r [AutoSwitch] EvaluateAndPropose: assignments=" .. tostring(assignments) .. ", count=" .. (assignments and #assignments or "nil"))
+    if not assignments or #assignments == 0 then
+        print("|cff00aaffAnySpec|r [AutoSwitch] no assignments found, returning")
+        return
     end
 
-    local currentSpec = AnySpec.SpecManager:GetCurrentSpecIndex()
-    print("|cff00aaffAnySpec|r: DEBUG - Current spec=" .. currentSpec .. ", assignment spec=" .. assignment.specIndex)
-    
-    if currentSpec == assignment.specIndex then 
-        print("|cff00aaffAnySpec|r: DEBUG - Already on assigned spec, skipping proposal")
-        return 
-    end
+    local currentSpec    = AnySpec.SpecManager:GetCurrentSpecIndex()
+    local activeConfigID = C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID() or nil
+    print("|cff00aaffAnySpec|r [AutoSwitch] current spec=" .. tostring(currentSpec) .. ", activeConfigID=" .. tostring(activeConfigID))
 
-    -- Check dismiss cooldown
-    local cooldownKey = self:GetDismissCooldownKey(zoneInfo, assignment.specIndex)
+    -- Single assignment: skip entirely if already on the correct spec+loadout.
+    if #assignments == 1 then
+        local a = assignments[1]
+        print("|cff00aaffAnySpec|r [AutoSwitch] single assignment: spec=" .. tostring(a.specIndex) .. ", loadout=" .. tostring(a.loadoutID))
+        if currentSpec == a.specIndex then
+            if not a.loadoutID or a.loadoutID == activeConfigID then
+                print("|cff00aaffAnySpec|r [AutoSwitch] already on correct spec+loadout, skipping proposal")
+                return
+            end
+            -- Wrong loadout — still worth proposing.
+        end
+    end
+    -- Multiple assignments: always show so the player can pick.
+
+    -- Check dismiss cooldown (per zone entry, not per spec).
+    local cooldownKey = self:GetDismissCooldownKey(zoneInfo)
     local lastDismiss = AnySpec.charDB.dismissedProposals[cooldownKey]
-    if lastDismiss and (GetTime() - lastDismiss) < DISMISS_COOLDOWN then 
-        print("|cff00aaffAnySpec|r: DEBUG - Dismissed recently, still in cooldown")
-        return 
+    local cooldownRemaining = lastDismiss and (DISMISS_COOLDOWN - (GetTime() - lastDismiss)) or 0
+    print("|cff00aaffAnySpec|r [AutoSwitch] cooldown key=" .. cooldownKey .. ", remaining=" .. tostring(cooldownRemaining))
+    if lastDismiss and (GetTime() - lastDismiss) < DISMISS_COOLDOWN then
+        print("|cff00aaffAnySpec|r [AutoSwitch] proposal on cooldown, skipping")
+        return
     end
 
-    print("|cff00aaffAnySpec|r: DEBUG - Showing proposal to switch to spec " .. assignment.specIndex)
-    AnySpec.UI.Proposal:Show(assignment, zoneInfo)
+    print("|cff00aaffAnySpec|r [AutoSwitch] showing proposal toast")
+    AnySpec.UI.Proposal:Show(assignments, zoneInfo)
 end
 
-function AS_MOD:GetDismissCooldownKey(zoneInfo, specIndex)
-    return (zoneInfo.category or "unknown") .. ":" .. (zoneInfo.instanceID or "0")
-        .. ":" .. (zoneInfo.difficultyID or "0") .. ":" .. specIndex
+-- Cooldown key: per zone entry (no per-spec component).
+function AS_MOD:GetDismissCooldownKey(zoneInfo)
+    return (zoneInfo.category or "unknown") .. ":"
+        .. (zoneInfo.instanceID  or "0") .. ":"
+        .. (zoneInfo.difficultyID or "0")
 end
 
--- Called by Proposal UI when the user dismisses the toast
-function AS_MOD:OnProposalDismissed(zoneInfo, specIndex)
-    local key = self:GetDismissCooldownKey(zoneInfo, specIndex)
+-- Called by Proposal UI when the user explicitly dismisses (ESC / outside click).
+-- NOT called on timeout — timeout does not set a cooldown.
+function AS_MOD:OnProposalDismissed(zoneInfo)
+    local key = self:GetDismissCooldownKey(zoneInfo)
     AnySpec.charDB.dismissedProposals[key] = GetTime()
 end

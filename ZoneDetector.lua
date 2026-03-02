@@ -22,6 +22,7 @@ local DIFFICULTY_MYTHIC_KEYSTONE = 8
 local eventFrame = CreateFrame("Frame")
 
 local function OnEvent(self, event, ...)
+    print("|cff00aaffAnySpec|r [ZoneDetector] Event: " .. tostring(event))
     if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
         ZD:OnZoneChanged()
     end
@@ -41,6 +42,29 @@ end
 
 -- Classify current zone into a category and return full zone info.
 -- Returns: { category, instanceType, instanceID, difficultyID, instanceName } or nil
+-- Helper: look up EJ dungeon ID by instance name
+local function GetEJDungeonIDByName(instanceName)
+    if not EJ_GetInstanceByIndex or not EJ_GetCurrentTier then return nil end
+    
+    local savedTier = EJ_GetCurrentTier()
+    -- Check tiers 1-20 for the matching instance
+    for tier = 1, 20 do
+        EJ_SelectTier(tier)
+        for i = 1, 999 do
+            local id, name = EJ_GetInstanceByIndex(i, false)  -- false = dungeons
+            if not id then break end
+            if name and name == instanceName then
+                EJ_SelectTier(savedTier)
+                print("|cff00aaffAnySpec|r [ZoneDetector] Matched '" .. instanceName .. "' to EJ ID " .. tostring(id))
+                return id
+            end
+        end
+    end
+    EJ_SelectTier(savedTier)
+    print("|cff00aaffAnySpec|r [ZoneDetector] No EJ match found for '" .. instanceName .. "'")
+    return nil
+end
+
 function ZD:GetCurrentZoneInfo()
     local inInstance, instanceType = IsInInstance()
 
@@ -54,20 +78,26 @@ function ZD:GetCurrentZoneInfo()
         }
     end
 
-    local name, iType, difficultyID = GetInstanceInfo()
     -- GetInstanceInfo returns: name, type, difficultyID, difficultyName, maxPlayers,
     --   dynamicDifficulty, isDynamic, instanceID, instanceGroupSize, lfgDungeonID
-    local _, _, diff, _, _, _, _, instanceID = GetInstanceInfo()
+    local instName, instType, instDiff, _, _, _, _, instID, _, lfgDungeonID = GetInstanceInfo()
 
-    -- Normalize: use the full return
-    local instName, instType, instDiff, _, _, _, _, instID = GetInstanceInfo()
+    print("|cff00aaffAnySpec|r [ZoneDetector] GetCurrentZoneInfo: name=" .. tostring(instName) 
+        .. ", type=" .. tostring(instType) .. ", diff=" .. tostring(instDiff)
+        .. ", instanceID=" .. tostring(instID) .. ", lfgDungeonID=" .. tostring(lfgDungeonID))
 
     local category = self:ClassifyInstance(instType, instDiff)
+
+    -- Try to find the EJ dungeon ID by matching the instance name
+    local ejDungeonID = GetEJDungeonIDByName(instName)
+    local usedID = ejDungeonID or lfgDungeonID or instID
+    
+    print("|cff00aaffAnySpec|r [ZoneDetector] Using ID: " .. tostring(usedID) .. " (ejID=" .. tostring(ejDungeonID) .. ")")
 
     return {
         category = category,
         instanceType = instType,
-        instanceID = instID,
+        instanceID = usedID,
         difficultyID = instDiff,
         instanceName = instName,
     }
@@ -97,6 +127,7 @@ end
 -- Called whenever the zone changes; notifies AutoSwitch
 function ZD:OnZoneChanged()
     local zoneInfo = self:GetCurrentZoneInfo()
+    print("|cff00aaffAnySpec|r [ZoneDetector] OnZoneChanged: " .. tostring(zoneInfo and zoneInfo.category) .. ", instance=" .. tostring(zoneInfo and zoneInfo.instanceID) .. ", name=" .. tostring(zoneInfo and zoneInfo.instanceName))
     if zoneInfo then
         AnySpec.AutoSwitch:OnZoneChanged(zoneInfo)
     end

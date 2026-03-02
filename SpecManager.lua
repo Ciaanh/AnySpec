@@ -73,34 +73,22 @@ end
 -- Attempt to switch to specIndex. Optionally queue loadoutID to apply after switch.
 -- Returns false (with reason string) if the switch cannot be initiated.
 function SM:SwitchSpec(specIndex, loadoutID)
-    print("|cff00aaffAnySpec|r: DEBUG - SwitchSpec called: specIndex=" .. tostring(specIndex) .. ", loadoutID=" .. tostring(loadoutID))
-    
     if InCombatLockdown() then
-        print("|cff00aaffAnySpec|r: DEBUG - Cannot switch: in combat")
         return false, "Cannot switch specs in combat."
     end
 
     local canUse, failureReason = C_SpecializationInfo.CanPlayerUseTalentSpecUI()
     if not canUse then
-        print("|cff00aaffAnySpec|r: DEBUG - Cannot use talent spec UI: " .. tostring(failureReason))
         return false, failureReason or "Spec UI unavailable."
     end
 
     local currentSpec = self:GetCurrentSpecIndex()
-    print("|cff00aaffAnySpec|r: DEBUG - Current spec: " .. tostring(currentSpec) .. ", target spec: " .. tostring(specIndex))
-    
     if currentSpec == specIndex then
         -- Already on this spec; apply loadout directly if provided
-        print("|cff00aaffAnySpec|r: DEBUG - Already on target spec, applying loadout directly")
-        if loadoutID then
-            self:ApplyLoadout(loadoutID)
-        else
-            print("|cff00aaffAnySpec|r: DEBUG - No loadout to apply (already on spec)")
-        end
+        if loadoutID then self:ApplyLoadout(loadoutID) end
         return true
     end
 
-    print("|cff00aaffAnySpec|r: DEBUG - Switching spec, queuing loadout for after switch")
     pendingLoadoutID = loadoutID or nil
     C_SpecializationInfo.SetSpecialization(specIndex)
     return true
@@ -108,64 +96,31 @@ end
 
 -- Apply a talent loadout by configID. Assumes current spec matches the loadout's spec.
 function SM:ApplyLoadout(configID)
-    print("|cff00aaffAnySpec|r: DEBUG - ApplyLoadout called: configID=" .. tostring(configID))
-    
-    if not configID then
-        print("|cff00aaffAnySpec|r: DEBUG - No configID provided, aborting")
-        return
-    end
+    if not configID then return end
 
     local canChange, failureReason = C_ClassTalents.CanChangeTalents()
-    print("|cff00aaffAnySpec|r: DEBUG - CanChangeTalents: " .. tostring(canChange) .. ", reason: " .. tostring(failureReason or "nil"))
-    
     if not canChange then
-        print("|cff00aaffAnySpec|r: Cannot change talents right now" .. (failureReason and (": " .. failureReason) or ""))
-        
-        -- Retry after a short delay if it's just a temporary restriction
+        -- Temporary restriction: retry once after a short delay
         if not failureReason or failureReason == "" then
-            print("|cff00aaffAnySpec|r: DEBUG - Retrying in 0.5 seconds...")
-            C_Timer.After(0.5, function()
-                SM:ApplyLoadout(configID)
-            end)
+            C_Timer.After(0.5, function() SM:ApplyLoadout(configID) end)
         end
         return
     end
 
-    -- Get current spec ID for UpdateLastSelectedSavedConfigID
     local currentSpec = self:GetCurrentSpecIndex()
     local spec = self:GetSpecInfo(currentSpec)
-    if not spec then
-        print("|cff00aaffAnySpec|r: ERROR - Could not get current spec info")
-        return
-    end
+    if not spec then return end
     local specID = spec.specID
-    
-    print("|cff00aaffAnySpec|r: DEBUG - Calling LoadConfig with configID=" .. tostring(configID) .. ", autoApply=true")
-    local result = C_ClassTalents.LoadConfig(configID, true)
-    print("|cff00aaffAnySpec|r: DEBUG - LoadConfig result: " .. tostring(result) .. " (0=Error, 1=NoChanges, 2=InProgress, 3=Ready)")
-    
+
     -- result: 0=Error, 1=NoChangesNecessary, 2=LoadInProgress, 3=Ready
+    local result = C_ClassTalents.LoadConfig(configID, true)
     if result == 1 then
-        -- NoChangesNecessary - already active, but still update last selected
-        print("|cff00aaffAnySpec|r: DEBUG - Loadout already active, updating last selected config ID")
         C_ClassTalents.UpdateLastSelectedSavedConfigID(specID, configID)
-        print("|cff00aaffAnySpec|r: Loadout already active")
-        
     elseif result == 3 then
-        -- Ready - needs commit
-        print("|cff00aaffAnySpec|r: DEBUG - Config ready, committing...")
         C_ClassTalents.UpdateLastSelectedSavedConfigID(specID, configID)
         C_ClassTalents.CommitConfig(configID)
-        print("|cff00aaffAnySpec|r: Loadout applied successfully")
-        
     elseif result == 2 then
-        -- LoadInProgress - autoApply=true means system will auto-commit
-        print("|cff00aaffAnySpec|r: DEBUG - Load in progress, system will auto-commit")
         C_ClassTalents.UpdateLastSelectedSavedConfigID(specID, configID)
-        print("|cff00aaffAnySpec|r: Loadout changes in progress...")
-        
-    elseif result == 0 then
-        print("|cff00aaffAnySpec|r: ERROR - Failed to load loadout config")
     end
 end
 

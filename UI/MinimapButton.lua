@@ -7,7 +7,7 @@ AnySpec.UI.MinimapButton = AnySpec.UI.MinimapButton or {}
 local MB = AnySpec.UI.MinimapButton
 
 local BUTTON_NAME = "AnySpecMinimapButton"
-local DEFAULT_ICON = 134063 -- INV_Misc_QuestionMark fallback; updated to current spec icon
+local DEFAULT_ICON = 134063 -- INV_Misc_QuestionMark default startup icon
 
 local button = nil
 
