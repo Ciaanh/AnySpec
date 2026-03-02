@@ -22,6 +22,15 @@ local HINT_H           = 18
 local FADE_DURATION    = 0.25
 local PROPOSAL_TIMEOUT = 8      -- seconds; expiry does NOT set dismiss cooldown
 
+-- Position options for the toast
+PR.POSITIONS = {
+    TOP_CENTER       = "top_center",
+    CENTER           = "center",
+    TOP_RIGHT        = "top_right",
+    BOTTOM_CENTER    = "bottom_center",
+}
+local DEFAULT_POSITION = PR.POSITIONS.TOP_CENTER
+
 ------------------------------------------------------------
 -- Module state
 ------------------------------------------------------------
@@ -29,6 +38,7 @@ local toast              = nil
 local proposalRows       = {}   -- row frames created per Show()
 local currentAssignments = nil  -- array of { specIndex, loadoutID }
 local currentZoneInfo    = nil
+local currentPosition    = DEFAULT_POSITION  -- saved position setting
 
 -- Unified per-frame state (timer + fade share one OnUpdate)
 local state = {
@@ -187,8 +197,9 @@ end
 local function BuildRows(assignments)
     ClearRows()
 
-    local currentSpec    = AnySpec.SpecManager:GetCurrentSpecIndex()
-    local rowsTopOffset  = PADDING + HEADER_H + SEP_H + 8
+    local currentSpec      = AnySpec.SpecManager:GetCurrentSpecIndex()
+    local currentLoadoutID = AnySpec.SpecManager:GetCurrentLoadoutConfigID()
+    local rowsTopOffset    = PADDING + HEADER_H + SEP_H + 8
 
     for i, a in ipairs(assignments) do
         local specInfo = AnySpec.SpecManager:GetSpecInfo(a.specIndex)
@@ -200,7 +211,10 @@ local function BuildRows(assignments)
                 if cfg then loadoutName = cfg.name end
             end
 
-            local isCurrent = (currentSpec == a.specIndex)
+            -- Match both spec and loadout to determine if this is the current config
+            local specMatch    = (currentSpec == a.specIndex)
+            local loadoutMatch = (a.loadoutID == currentLoadoutID)  -- nil==nil is true (both default)
+            local isCurrent    = specMatch and loadoutMatch
 
             local row = CreateFrame("Button", nil, toast)
             row:SetSize(TOAST_W - PADDING * 2, ROW_H)
@@ -274,10 +288,45 @@ local function BuildRows(assignments)
 end
 
 ------------------------------------------------------------
+-- Position management
+------------------------------------------------------------
+local function AnchorToastFrame(f, position)
+    position = position or currentPosition or DEFAULT_POSITION
+    f:ClearAllPoints()
+    
+    if position == PR.POSITIONS.TOP_CENTER then
+        f:SetPoint("TOP", UIParent, "TOP", 0, -80)
+    elseif position == PR.POSITIONS.CENTER then
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    elseif position == PR.POSITIONS.TOP_RIGHT then
+        f:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -40, -80)
+    elseif position == PR.POSITIONS.BOTTOM_CENTER then
+        f:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 80)
+    end
+end
+
+------------------------------------------------------------
 -- Public API
 ------------------------------------------------------------
 function PR:Init()
     toast = CreateToast()
+end
+
+function PR:SetPosition(position)
+    -- Normalize position key: "top-center" or "top_center" -> "TOP_CENTER"
+    local normalized = position:upper():gsub("-", "_")
+    if PR.POSITIONS[normalized] then
+        currentPosition = position
+        if toast then
+            AnchorToastFrame(toast, position)
+        end
+        return true
+    end
+    return false
+end
+
+function PR:GetPosition()
+    return currentPosition or DEFAULT_POSITION
 end
 
 -- assignments = array of { specIndex, loadoutID }
@@ -303,7 +352,7 @@ function PR:Show(assignments, zoneInfo)
     local hintH  = showHint and (HINT_H + 4) or 0
     local totalH = PADDING + HEADER_H + SEP_H + 8 + rowsH + 8 + hintH + TIMER_H + PADDING
     toast:SetSize(TOAST_W, totalH)
-    toast:SetPoint("TOP", UIParent, "TOP", 0, -80)
+    AnchorToastFrame(toast, currentPosition)
 
     toast._header:SetText(zoneInfo.instanceName or zoneInfo.category or "")
 

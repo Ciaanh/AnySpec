@@ -23,6 +23,7 @@ local DIVIDER_W  = 1
 -- Module state
 ------------------------------------------------------------
 local frame          = nil
+local currentView    = "locations"  -- "locations" or "settings"
 local currentTab     = "dungeons"   -- "dungeons" or "raids"
 local currentTierIdx = nil          -- nil → default to newest tier on first open
 local instanceRows   = {}
@@ -30,6 +31,7 @@ local tierList       = {}           -- { { index, name }, ... } newest-first
 local tierDropdown   = nil
 local scrollFrame    = nil
 local scrollChild    = nil
+local viewContainer  = nil          -- container for switchable views
 
 -- Assignment dialog state
 local assignmentDialog    = nil   -- modal dialog frame (created once in Init)
@@ -806,21 +808,187 @@ local function CreateMainFrame()
     hSep:SetHeight(1)
     hSep:SetColorTexture(0.28, 0.28, 0.32, 1)
 
-    -- ── Left panel ────────────────────────────────────────
-    -- Create a scroll frame for the left panel content (it can get tall)
-    local leftPanelScroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    leftPanelScroll:SetPoint("TOPLEFT",    f, "TOPLEFT",    1, -(HEADER_H + 1))
-    leftPanelScroll:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 1, 1)
-    leftPanelScroll:SetWidth(LEFT_W)
+    ----========════════════════════════════════════════════════
+    -- VIEW MANAGEMENT SYSTEM
+    ----========════════════════════════════════════════════════
+    local viewContainer = CreateFrame("Frame", nil, f)
+    viewContainer:SetPoint("TOPLEFT",     f, "TOPLEFT",     1 + LEFT_W + DIVIDER_W, -(HEADER_H + 1))
+    viewContainer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
 
-    local leftPanel = CreateFrame("Frame", nil, leftPanelScroll)
-    leftPanel:SetHeight(1)  -- Will be adjusted below
-    leftPanel:SetWidth(LEFT_W - 4)  -- Account for scrollbar
-    leftPanelScroll:SetScrollChild(leftPanel)
+    -- Views will be created as children of viewContainer
+    local views = {}
+    
+    -- Switch to a view
+    local function ShowView(viewName)
+        for name, view in pairs(views) do
+            if name == viewName then
+                view:Show()
+            else
+                view:Hide()
+            end
+        end
+        currentView = viewName
+    end
 
-    -- Now build the content into leftPanel
+    ----========════════════════════════════════════════════════
+    -- LOCATIONS VIEW (Dungeons/Raids with instance list)
+    ----========════════════════════════════════════════════════
+    local function CreateLocationsView()
+        local view = CreateFrame("Frame", nil, viewContainer)
+        view:SetAllPoints(viewContainer)
+        views.locations = view
+
+        -- This view uses the existing right panel setup
+        BuildRightPanel(view)
+        return view
+    end
+
+    ----========════════════════════════════════════════════════
+    -- SETTINGS VIEW (Position, checkboxes, test button)
+    ----========════════════════════════════════════════════════
+    local function CreateSettingsView()
+        local view = CreateFrame("Frame", nil, viewContainer)
+        view:SetAllPoints(viewContainer)
+        views.settings = view
+        
+        local y = -14
+        
+        -- ── Toast Position ──────────────────────────────
+        local posHdr = view:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        posHdr:SetPoint("TOPLEFT", view, "TOPLEFT", 12, y)
+        posHdr:SetText("Toast Position")
+        y = y - 26
+        
+        local posDesc = view:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        posDesc:SetPoint("TOPLEFT", view, "TOPLEFT", 12, y)
+        posDesc:SetWidth(350)
+        posDesc:SetJustifyH("LEFT")
+        posDesc:SetWordWrap(true)
+        posDesc:SetTextColor(0.55, 0.55, 0.55)
+        posDesc:SetText("Choose where the spec+loadout proposal toast appears:")
+        y = y - (math.max(14, math.floor(posDesc:GetStringHeight() + 0.5))) - 8
+        
+        -- Position buttons
+        local positions = {
+            { key = "top_center",    label = "Top Center" },
+            { key = "center",        label = "Center" },
+            { key = "top_right",     label = "Top Right" },
+            { key = "bottom_center", label = "Bottom Center" },
+        }
+        
+        local posButtons = {}
+        
+        local function UpdatePositionButtons()
+            local currentPos = AnySpec.UI.Proposal:GetPosition()
+            for _, btn in ipairs(posButtons) do
+                btn:SetEnabled(btn._posKey ~= currentPos)
+            end
+        end
+        
+        local function MakePosButton(posKey, posLabel, idx)
+            local btn = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
+            btn:SetSize(170, 28)
+            local col = (idx - 1) % 2
+            local row = math.floor((idx - 1) / 2)
+            btn:SetPoint("TOPLEFT", view, "TOPLEFT", 12 + col * 180, y - row * 34)
+            btn:SetText(posLabel)
+            btn._posKey = posKey
+            
+            btn:SetScript("OnClick", function()
+                if AnySpec.UI.Proposal:SetPosition(posKey) then
+                    if AnySpec.db then
+                        AnySpec.db.toastPosition = posKey
+                    end
+                    UpdatePositionButtons()
+                end
+            end)
+            
+            return btn
+        end
+        
+        for idx, posDef in ipairs(positions) do
+            local btn = MakePosButton(posDef.key, posDef.label, idx)
+            table.insert(posButtons, btn)
+        end
+        UpdatePositionButtons()
+        y = y - 72
+        
+        -- ── General Settings ────────────────────────────
+        y = y - 10
+        local setHdr = view:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        setHdr:SetPoint("TOPLEFT", view, "TOPLEFT", 12, y)
+        setHdr:SetText("Settings")
+        y = y - 26
+        
+        -- Helper to build a checkbox in settings view
+        local function Checkbox(label, getter, setter)
+            local cb = CreateFrame("CheckButton", nil, view, "UICheckButtonTemplate")
+            cb:SetPoint("TOPLEFT", view, "TOPLEFT", 8, y)
+            cb.text:SetText(label)
+            cb:SetChecked(getter())
+            cb:SetScript("OnClick", function(self) setter(self:GetChecked()) end)
+            y = y - 28
+            return cb
+        end
+
+        Checkbox("Minimap button", function()
+            return AnySpec.db and AnySpec.db.minimapButton ~= false
+        end, function(val)
+            if AnySpec.db then AnySpec.db.minimapButton = val end
+            AnySpec.UI.MinimapButton:SetShown(val)
+        end)
+
+        Checkbox("Enable auto-switch proposals", function()
+            return AnySpec.db and AnySpec.db.proposalEnabled ~= false
+        end, function(val)
+            if AnySpec.db then AnySpec.db.proposalEnabled = val end
+        end)
+        
+        y = y - 14
+        
+        -- ── Test Toast ──────────────────────────────────
+        local testBtn = CreateFrame("Button", nil, view, "UIPanelButtonTemplate")
+        testBtn:SetSize(340, 24)
+        testBtn:SetPoint("TOPLEFT", view, "TOPLEFT", 12, y)
+        testBtn:SetText("Test Proposal Toast")
+        testBtn:SetScript("OnClick", function()
+            local specs = AnySpec.SpecManager:GetAllSpecs()
+            local testAssignments = {}
+            for i = 1, math.min(3, #specs) do
+                local spec = specs[i]
+                local loadouts = AnySpec.SpecManager:GetLoadoutsForSpec(spec.specIndex)
+                local loadoutID = nil
+                if #loadouts > 0 and i > 1 then
+                    loadoutID = loadouts[1].configID
+                end
+                table.insert(testAssignments, { specIndex = spec.specIndex, loadoutID = loadoutID })
+            end
+            
+            local testZoneInfo = {
+                category = "dungeon",
+                instanceType = "party",
+                instanceID = 9999,
+                difficultyID = 0,
+                instanceName = "Test Instance",
+            }
+            
+            AnySpec.UI.Proposal:Show(testAssignments, testZoneInfo)
+        end)
+        
+        view:Hide()
+        return view
+    end
+
+    ----========════════════════════════════════════════════════
+    -- LEFT PANEL (Persistent: drag buttons + view links)
+    ----========════════════════════════════════════════════════
+    local leftPanel = CreateFrame("Frame", nil, f)
+    leftPanel:SetPoint("TOPLEFT",    f, "TOPLEFT",    1, -(HEADER_H + 1))
+    leftPanel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 1, 1)
+    leftPanel:SetWidth(LEFT_W)
+
     local y = -14
-
+    
     -- ── Quick Access ──────────────────────────────────────
     local hdr = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     hdr:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
@@ -835,13 +1003,12 @@ local function CreateMainFrame()
     desc:SetWordWrap(true)
     desc:SetTextColor(0.55, 0.55, 0.55)
     desc:SetText("Drag to action bars to create macro shortcuts.")
-
     local descHeight = math.max(14, math.floor(desc:GetStringHeight() + 0.5))
     y = y - descHeight - 8
 
-    -- Spec-selector button (ANYSPEC_SWITCH)
+    -- Spec-selector button
     local switchIcon = 134063
-    local curSpec    = AnySpec.SpecManager:GetCurrentSpecIndex()
+    local curSpec    =AnySpec.SpecManager:GetCurrentSpecIndex()
     if curSpec then
         local info = AnySpec.SpecManager:GetSpecInfo(curSpec)
         if info then switchIcon = info.icon end
@@ -866,43 +1033,31 @@ local function CreateMainFrame()
         y = y - 32
     end
 
-    y = y - 10
-
-    -- ── Settings ──────────────────────────────────────────
-    local hdr2 = leftPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    hdr2:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, y)
-    hdr2:SetText("Settings")
-    y = y - 24
-
-    -- Helper to build a checkbox
-    local function Checkbox(label, getter, setter)
-        local cb = CreateFrame("CheckButton", nil, leftPanel, "UICheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 8, y)
-        cb.text:SetText(label)
-        cb:SetChecked(getter())
-        cb:SetScript("OnClick", function(self) setter(self:GetChecked()) end)
-        y = y - 28
-        return cb
-    end
-
-    Checkbox("Minimap button", function()
-        return AnySpec.db and AnySpec.db.minimapButton ~= false
-    end, function(val)
-        if AnySpec.db then AnySpec.db.minimapButton = val end
-        AnySpec.UI.MinimapButton:SetShown(val)
-    end)
-
-    Checkbox("Enable auto-switch proposals", function()
-        return AnySpec.db and AnySpec.db.proposalEnabled ~= false
-    end, function(val)
-        if AnySpec.db then AnySpec.db.proposalEnabled = val end
-    end)
-
-    y = y - 8
+    y = y - 14
     
-    -- Set scroll child height
-    leftPanel:SetHeight(math.abs(y) + 20)
-
+    -- ── View Links ──────────────────────────────────────
+    local function CreateViewLink(label, viewName, posY)
+        local btn = CreateFrame("Button", nil, leftPanel)
+        btn:SetSize(LEFT_W - 24, 20)
+        btn:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 12, posY)
+        
+        btn:SetNormalFontObject("GameFontNormal")
+        btn:SetHighlightFontObject("GameFontHighlight")
+        btn:GetFontString():SetText(label)
+        btn:GetFontString():SetTextColor(0.05, 0.65, 1)
+        
+        btn:SetScript("OnClick", function()
+            ShowView(viewName)
+        end)
+        
+        return btn
+    end
+    
+    CreateViewLink("📍 Locations", "locations", y)
+    y = y - 24
+    
+    CreateViewLink("⚙ Settings", "settings", y)
+    
     -- Vertical divider
     local vSep = f:CreateTexture(nil, "ARTWORK")
     vSep:SetPoint("TOPLEFT",    f, "TOPLEFT",    1 + LEFT_W, -(HEADER_H + 1))
@@ -910,11 +1065,12 @@ local function CreateMainFrame()
     vSep:SetWidth(DIVIDER_W)
     vSep:SetColorTexture(0.28, 0.28, 0.32, 1)
 
-    -- ── Right panel ───────────────────────────────────────
-    local rightPanel = CreateFrame("Frame", nil, f)
-    rightPanel:SetPoint("TOPLEFT",     f, "TOPLEFT",     1 + LEFT_W + DIVIDER_W, -(HEADER_H + 1))
-    rightPanel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
-    BuildRightPanel(rightPanel)
+    ----========════════════════════════════════════════════════
+    -- INITIALIZE VIEWS
+    ----========════════════════════════════════════════════════
+    CreateLocationsView()
+    CreateSettingsView()
+    ShowView("locations")
 
     -- ── OnShow: restore position, init tiers, select tab ─
     f:SetScript("OnShow", function(self)
@@ -923,6 +1079,11 @@ local function CreateMainFrame()
             local pos = AnySpec.db.framePosition
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x, pos.y)
+        end
+        
+        -- Restore toast position
+        if AnySpec.db and AnySpec.db.toastPosition then
+            AnySpec.UI.Proposal:SetPosition(AnySpec.db.toastPosition)
         end
 
         -- Load tier list the first time the frame is opened

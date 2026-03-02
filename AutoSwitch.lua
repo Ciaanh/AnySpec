@@ -139,16 +139,16 @@ function AS_MOD:EvaluateAndPropose(zoneInfo)
         return
     end
 
-    local currentSpec    = AnySpec.SpecManager:GetCurrentSpecIndex()
-    local activeConfigID = C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID() or nil
-    print("|cff00aaffAnySpec|r [AutoSwitch] current spec=" .. tostring(currentSpec) .. ", activeConfigID=" .. tostring(activeConfigID))
+    local currentSpec      = AnySpec.SpecManager:GetCurrentSpecIndex()
+    local currentLoadoutID = AnySpec.SpecManager:GetCurrentLoadoutConfigID()
+    print("|cff00aaffAnySpec|r [AutoSwitch] current spec=" .. tostring(currentSpec) .. ", currentLoadoutID=" .. tostring(currentLoadoutID))
 
     -- Single assignment: skip entirely if already on the correct spec+loadout.
     if #assignments == 1 then
         local a = assignments[1]
         print("|cff00aaffAnySpec|r [AutoSwitch] single assignment: spec=" .. tostring(a.specIndex) .. ", loadout=" .. tostring(a.loadoutID))
         if currentSpec == a.specIndex then
-            if not a.loadoutID or a.loadoutID == activeConfigID then
+            if not a.loadoutID or a.loadoutID == currentLoadoutID then
                 print("|cff00aaffAnySpec|r [AutoSwitch] already on correct spec+loadout, skipping proposal")
                 return
             end

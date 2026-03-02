@@ -147,3 +147,57 @@ function SM:GetLoadoutsForSpec(specIndex)
     
     return loadouts
 end
+
+------------------------------------------------------------
+-- Current loadout state detection
+------------------------------------------------------------
+
+-- Returns the configID of the currently selected saved loadout for the active spec,
+-- or nil if the player is on the "Default loadout" (no saved loadout selected).
+function SM:GetCurrentLoadoutConfigID()
+    local specIndex = self:GetCurrentSpecIndex()
+    if not specIndex then return nil end
+    local spec = self:GetSpecInfo(specIndex)
+    if not spec then return nil end
+
+    if C_ClassTalents.GetLastSelectedSavedConfigID then
+        return C_ClassTalents.GetLastSelectedSavedConfigID(spec.specID)
+    end
+    return nil
+end
+
+-- Returns a descriptive table about the current loadout state:
+--   { configID = number|nil, name = string, isDefault = bool, isStarterBuild = bool }
+function SM:GetCurrentLoadoutInfo()
+    local info = { configID = nil, name = "Default loadout", isDefault = true, isStarterBuild = false }
+
+    -- Check starter build first
+    if C_ClassTalents.GetStarterBuildActive and C_ClassTalents.GetStarterBuildActive() then
+        info.name = "Starter Build"
+        info.isDefault = false
+        info.isStarterBuild = true
+        return info
+    end
+
+    local configID = self:GetCurrentLoadoutConfigID()
+    if configID then
+        info.configID = configID
+        info.isDefault = false
+        local cfg = C_Traits.GetConfigInfo(configID)
+        if cfg and cfg.name and cfg.name ~= "" then
+            info.name = cfg.name
+        else
+            info.name = "Loadout " .. configID
+        end
+    end
+
+    return info
+end
+
+-- Returns true if the player is currently on the default (unsaved) loadout.
+function SM:IsOnDefaultLoadout()
+    if C_ClassTalents.GetStarterBuildActive and C_ClassTalents.GetStarterBuildActive() then
+        return false
+    end
+    return self:GetCurrentLoadoutConfigID() == nil
+end
