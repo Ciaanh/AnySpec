@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-based spec assignments
 - Loadout support - pair spec switches with talent loadout configurations
 - Auto-switch proposal toasts when entering content with configured assignments
-- Temporary proposal dismissal (8-second cooldown)
+- Auto-switch proposal toasts auto-hide after 8 seconds; explicit dismissal suppresses the same proposal for 60 seconds
 - Localization system with English (enUS) as default
 - Slash commands: `/anyspec`, `/anyspec switch`, `/anyspec config`, `/anyspec help`
 - Account-wide settings (AnySpecDB) and per-character assignments (AnySpecCharDB)

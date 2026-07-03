@@ -6,7 +6,7 @@ A World of Warcraft addon that automates talent specialization and loadout manag
 
 - **Minimap Button** — Left-click opens the settings panel; right-click toggles the spec selector popup. Draggable around the minimap edge.
 - **Quick Spec Switching** — A spec selector popup with all your specs listed, plus a draggable **Spec Selector** quick-access button you can place on your action bars.
-- **Content-Based Assignments** — Assign a preferred spec per content category (Dungeon, Raid) directly in the configuration panel.
+- **Per-Instance Assignments** — Assign a preferred spec (and optional loadout) to individual dungeons and raids, browsed by expansion, directly in the configuration panel.
 - **Auto-Switch Proposals** — When you enter content that has a configured assignment, a toast notification asks if you'd like to switch.
 - **Loadout Support** — Spec switches can be paired with a talent loadout that applies automatically once the specialization change completes.
 
@@ -27,6 +27,8 @@ A World of Warcraft addon that automates talent specialization and loadout manag
 /anyspec help        Show available commands
 ```
 
+`/as` is a short alias for `/anyspec` (e.g. `/as switch`).
+
 ### Action Bar Buttons
 
 Open the settings panel (`/anyspec`) and look at the **Quick Access Buttons** section. You can drag this button to your action bars:
@@ -35,8 +37,7 @@ Open the settings panel (`/anyspec`) and look at the **Quick Access Buttons** se
 
 ### Configuring Assignments
 
-In the settings panel under **Content Assignments**, select a spec for each content type (dungeon or raid).
-Use the dropdown to select the expansion or the current season.
+In the settings panel under **Content Assignments**, pick the **Dungeons** or **Raids** tab and use the expansion dropdown to browse instances. Click an instance's button to assign one or more spec (+ optional loadout) pairs to it.
 
 ### Proposal Toasts
 
@@ -51,7 +52,7 @@ Proposals are automatically hidden after a short period of time if nothing is se
 
 | Variable        | Scope         | Contents                                                   |
 | --------------- | ------------- | ---------------------------------------------------------- |
-| `AnySpecDB`     | Account-wide  | Global settings (proposal timeout, sounds, minimap button) |
+| `AnySpecDB`     | Account-wide  | Global settings (auto-switch toggle, toast position, minimap button) |
 | `AnySpecCharDB` | Per-character | Spec/loadout assignments, dismissed proposals              |
 
 ## License

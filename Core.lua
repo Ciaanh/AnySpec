@@ -13,6 +13,7 @@ local DB_DEFAULTS = {
     minimapButton = true,
     minimapButtonAngle = 2.5,
     framePosition = nil,
+    toastPosition = "top_center",
 }
 
 local CHAR_DB_DEFAULTS = {

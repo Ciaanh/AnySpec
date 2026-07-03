@@ -17,6 +17,7 @@ local modal = nil
 local clickHandler = nil
 local specRows = {}
 local selectedLoadoutsBySpec = {} -- [specIndex] = configID
+local introTipShown = false       -- intro tip is printed once per session, not per open
 
 ------------------------------------------------------------
 -- Create the centered modal frame
@@ -344,12 +345,17 @@ local function BuildSpecRows(parent)
         -- Click handler
         row:SetScript("OnClick", function()
             local loadoutToUse = selectedLoadoutsBySpec[specIdx]
+            local ok, err = AnySpec.SpecManager:SwitchSpec(specIdx, loadoutToUse)
+            if not ok then
+                -- Leave the popup open so the reason (e.g. combat) stays visible.
+                print("|cffff4444" .. L["ADDON_PREFIX"] .. ":|r " .. (err or L["PROPOSAL_SWITCH_FAILED"]))
+                return
+            end
             if loadoutToUse then
                 print(string.format(L["QS_SWITCHING_WITH_LOADOUT"], spec.name))
             else
                 print(string.format(L["QS_SWITCHING"], spec.name))
             end
-            AnySpec.SpecManager:SwitchSpec(specIdx, loadoutToUse)
             QS:Hide()
         end)
 
@@ -423,7 +429,10 @@ function QS:Show()
     modal:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 
     modal:Show()
-    print(L["QS_INTRO_TIP"])
+    if not introTipShown then
+        print(L["QS_INTRO_TIP"])
+        introTipShown = true
+    end
 end
 
 function QS:Hide()

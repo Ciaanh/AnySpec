@@ -102,24 +102,6 @@ function AS_MOD:GetAssignment(zoneInfo)
     return nil
 end
 
--- Save instance assignments.
--- pairs is an array of { specIndex, loadoutID }; pass nil or {} to clear.
-function AS_MOD:SetInstanceAssignment(instanceID, pairs)
-    local charDB = AnySpec.charDB
-    if not charDB then return end
-    if not pairs or #pairs == 0 then
-        charDB.instanceAssignments[instanceID] = nil
-    else
-        charDB.instanceAssignments[instanceID] = pairs
-    end
-end
-
-function AS_MOD:ClearInstanceAssignment(instanceID)
-    local charDB = AnySpec.charDB
-    if not charDB then return end
-    charDB.instanceAssignments[instanceID] = nil
-end
-
 -- Evaluate whether a proposal should be shown for the current zone.
 function AS_MOD:EvaluateAndPropose(zoneInfo)
     local assignments = self:GetAssignment(zoneInfo)
@@ -145,7 +127,6 @@ function AS_MOD:EvaluateAndPropose(zoneInfo)
     -- Check dismiss cooldown (per zone entry, not per spec).
     local cooldownKey = self:GetDismissCooldownKey(zoneInfo)
     local lastDismiss = AnySpec.charDB.dismissedProposals[cooldownKey]
-    local cooldownRemaining = lastDismiss and (DISMISS_COOLDOWN - (GetTime() - lastDismiss)) or 0
     if lastDismiss and (GetTime() - lastDismiss) < DISMISS_COOLDOWN then
         return
     end
