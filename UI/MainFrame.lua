@@ -27,7 +27,6 @@ local frame          = nil
 local currentView    = "locations"  -- "locations" or "settings"
 local currentTab     = "dungeons"   -- "dungeons" or "raids"
 local currentTierIdx = nil          -- nil → default to newest tier on first open
-local instanceRows   = {}
 local tierList       = {}           -- { { index, name }, ... } newest-first
 local tierDropdown   = nil
 local scrollFrame    = nil
@@ -474,130 +473,149 @@ local function OpenAssignmentDialog(instanceID, instanceName)
 end
 
 ------------------------------------------------------------
--- Per-instance row button (opens the dialog)
-------------------------------------------------------------
-local function CreateAssignButton(parent, instanceID, instanceName, width)
-    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btn:SetSize(width, 22)
-
-    local function Refresh()
-        btn:SetText(GetAssignmentSummary(instanceID))
-    end
-    instanceRowRefreshFns[instanceID] = Refresh
-    Refresh()
-
-    btn:SetScript("OnClick", function()
-        OpenAssignmentDialog(instanceID, instanceName)
-    end)
-
-    btn:SetScript("OnEnter", function(self)
-        local tip = GetAssignmentTooltip(instanceID)
-        if tip then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(instanceName or "", 1, 1, 1)
-            GameTooltip:AddLine(tip, 0.8, 0.8, 0.8, false)
-            GameTooltip:Show()
-        end
-    end)
-    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    return btn
-end
-
-------------------------------------------------------------
 -- Rebuild the instance scroll list
+--
+-- Rows are pooled and reused across rebuilds (tab/tier/resize changes) so we
+-- don't leak anonymous frames for the whole session. Each pooled row is created
+-- once with all its child widgets and reconfigured per instance on rebuild.
 ------------------------------------------------------------
 local ROW_H      = 36
 local ICON_SIZE  = 26
 local BTN_WIDTH  = 150
 
+local instanceRowPool = {}   -- reusable instance-row frames, indexed 1..N
+
+-- Create (once) or fetch the pooled instance row at the given index.
+-- The assign button reads row._instanceID / row._instanceName so it can be
+-- reconfigured for a different instance without recreating scripts.
+local function AcquireInstanceRow(index)
+    local row = instanceRowPool[index]
+    if row then return row end
+
+    row = CreateFrame("Frame", nil, scrollChild)
+
+    local bg = row:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    row._bg = bg
+
+    local ico = row:CreateTexture(nil, "ARTWORK")
+    ico:SetSize(ICON_SIZE, ICON_SIZE)
+    ico:SetPoint("LEFT", row, "LEFT", 8, 0)
+    ico:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    row._icon = ico
+
+    local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lbl:SetPoint("LEFT", ico, "RIGHT", 7, 0)
+    lbl:SetPoint("RIGHT", row, "RIGHT", -(BTN_WIDTH + 12), 0)
+    lbl:SetJustifyH("LEFT")
+    row._label = lbl
+
+    local ab = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    ab:SetSize(BTN_WIDTH, 22)
+    ab:SetPoint("RIGHT",  row, "RIGHT",  -6, 0)
+    ab:SetPoint("CENTER", row, "CENTER", (BTN_WIDTH / 2 + 6), 0)
+    ab:SetScript("OnClick", function()
+        OpenAssignmentDialog(row._instanceID, row._instanceName)
+    end)
+    ab:SetScript("OnEnter", function(self)
+        local tip = GetAssignmentTooltip(row._instanceID)
+        if tip then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(row._instanceName or "", 1, 1, 1)
+            GameTooltip:AddLine(tip, 0.8, 0.8, 0.8, false)
+            GameTooltip:Show()
+        end
+    end)
+    ab:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row._assignBtn = ab
+
+    instanceRowPool[index] = row
+    return row
+end
+
 local function RebuildInstanceList(tierIndex, isRaid)
     if not scrollChild then return end
 
-    -- Remove old rows
-    for _, row in ipairs(instanceRows) do
-        row:SetParent(nil)
-        row:Hide()
-    end
-    instanceRows = {}
     wipe(instanceRowRefreshFns)
-    if scrollChild._emptyLabel then
-        scrollChild._emptyLabel:SetParent(nil)
-        scrollChild._emptyLabel = nil
-    end
 
-    local instances   = GetInstances(tierIndex, isRaid)
-    local tierName    = ""
+    local instances = GetInstances(tierIndex, isRaid)
+    local tierName  = ""
     for _, t in ipairs(tierList) do
         if t.index == tierIndex then
             tierName = t.name
             break
         end
     end
-    
-    local rowW        = scrollChild:GetWidth()
-    
+
+    local rowW = scrollChild:GetWidth()
     -- Ensure we have a valid width; if not, estimate based on scrollFrame
     if rowW == 0 or rowW < 100 then
         rowW = (scrollFrame:GetWidth() or 400) - 4
     end
-    
-    local y           = -6
+
+    local y             = -6
     local filteredCount = 0
 
-    for i, inst in ipairs(instances) do
-        -- Skip open world bosses: if instance name matches the tier name, it's an open world boss encounter
+    for _, inst in ipairs(instances) do
+        -- Skip open world bosses: if the instance name matches the tier name,
+        -- it's an open-world boss encounter, not a real instance.
         if inst.name ~= tierName then
             filteredCount = filteredCount + 1
-            local row = CreateFrame("Frame", nil, scrollChild)
+
+            local row = AcquireInstanceRow(filteredCount)
             row:SetSize(rowW, ROW_H)
+            row:ClearAllPoints()
             row:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, y)
 
-            -- Row background (alternating shading)
-            local bg = row:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
+            -- Alternating row shading
             if filteredCount % 2 == 1 then
-                bg:SetColorTexture(0.14, 0.14, 0.14, 0.55)
+                row._bg:SetColorTexture(0.14, 0.14, 0.14, 0.55)
             else
-                bg:SetColorTexture(0.09, 0.09, 0.09, 0.35)
+                row._bg:SetColorTexture(0.09, 0.09, 0.09, 0.35)
             end
 
-            -- Instance icon
-            local ico = row:CreateTexture(nil, "ARTWORK")
-            ico:SetSize(ICON_SIZE, ICON_SIZE)
-            ico:SetPoint("LEFT", row, "LEFT", 8, 0)
-            ico:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            -- Instance icon (with question-mark fallback)
             if inst.icon and inst.icon ~= 0 then
-                ico:SetTexture(inst.icon)
+                row._icon:SetTexture(inst.icon)
             else
-                ico:SetTexture(134400) -- question mark fallback
+                row._icon:SetTexture(134400)
             end
 
-            -- Instance name
-            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            lbl:SetPoint("LEFT", ico, "RIGHT", 7, 0)
-            lbl:SetPoint("RIGHT", row, "RIGHT", -(BTN_WIDTH + 12), 0)
-            lbl:SetJustifyH("LEFT")
-            lbl:SetText(inst.name)
+            row._label:SetText(inst.name)
 
-            -- Spec assignment button
-            local ab = CreateAssignButton(row, inst.id, inst.name, BTN_WIDTH)
-            ab:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-            ab:SetPoint("CENTER", row, "CENTER", (BTN_WIDTH / 2 + 6), 0)
+            -- Reconfigure the assign button for this instance
+            local instId = inst.id
+            row._instanceID   = instId
+            row._instanceName = inst.name
+            instanceRowRefreshFns[instId] = function()
+                row._assignBtn:SetText(GetAssignmentSummary(instId))
+            end
+            row._assignBtn:SetText(GetAssignmentSummary(instId))
 
+            row:Show()
             y = y - ROW_H
-            tinsert(instanceRows, row)
         end
+    end
+
+    -- Hide any pooled rows left over from a longer previous list
+    for i = filteredCount + 1, #instanceRowPool do
+        instanceRowPool[i]:Hide()
     end
 
     scrollChild:SetHeight(math.max(1, -y + 6))
 
+    -- Empty-state label (created once, then reused)
     if filteredCount == 0 then
-        local empty = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        empty:SetPoint("CENTER", scrollChild, "CENTER", 0, -40)
-        empty:SetTextColor(0.45, 0.45, 0.45)
-        empty:SetText(L["INSTANCES_EMPTY"])
-        scrollChild._emptyLabel = empty
+        if not scrollChild._emptyLabel then
+            local empty = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            empty:SetPoint("CENTER", scrollChild, "CENTER", 0, -40)
+            empty:SetTextColor(0.45, 0.45, 0.45)
+            empty:SetText(L["INSTANCES_EMPTY"])
+            scrollChild._emptyLabel = empty
+        end
+        scrollChild._emptyLabel:Show()
+    elseif scrollChild._emptyLabel then
+        scrollChild._emptyLabel:Hide()
     end
 end
 

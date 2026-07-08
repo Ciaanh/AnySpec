@@ -36,7 +36,8 @@ local DEFAULT_POSITION = PR.POSITIONS.TOP_CENTER
 -- Module state
 ------------------------------------------------------------
 local toast              = nil
-local proposalRows       = {}   -- row frames created per Show()
+local rowPool            = {}   -- all row frames ever created (reused across shows)
+local proposalRows       = {}   -- rows active for the current Show() (subset of rowPool)
 local currentAssignments = nil  -- array of { specIndex, loadoutID }
 local currentZoneInfo    = nil
 local currentPosition    = DEFAULT_POSITION  -- saved position setting
@@ -55,9 +56,9 @@ local state = {
 -- Helpers
 ------------------------------------------------------------
 local function ClearRows()
-    for _, row in ipairs(proposalRows) do
+    -- Hide (don't orphan) pooled rows so they can be reused on the next show.
+    for _, row in ipairs(rowPool) do
         row:Hide()
-        row:SetParent(nil)
     end
     wipe(proposalRows)
 end
@@ -194,7 +195,77 @@ end
 
 ------------------------------------------------------------
 -- Build per-show spec+loadout rows
+--
+-- Rows are pooled and reused between shows. Each pooled row is created once
+-- with all its child widgets (including the conditionally-shown green tint and
+-- checkmark) and reconfigured per assignment, so repeated toasts don't leak
+-- anonymous frames.
 ------------------------------------------------------------
+
+-- Create (once) or fetch the pooled row at the given index.
+local function AcquireProposalRow(index)
+    local row = rowPool[index]
+    if row then return row end
+
+    row = CreateFrame("Button", nil, toast)
+    row:SetSize(TOAST_W - PADDING * 2, ROW_H)
+    row:RegisterForClicks("LeftButtonUp")
+    row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+
+    -- Green tint shown only when the row matches the current spec+loadout
+    local rowBg = row:CreateTexture(nil, "BACKGROUND")
+    rowBg:SetAllPoints()
+    rowBg:SetColorTexture(0.07, 0.32, 0.07, 0.4)
+    rowBg:Hide()
+    row._bg = rowBg
+
+    -- Number badge
+    local badge = row:CreateTexture(nil, "BACKGROUND")
+    badge:SetSize(22, 22)
+    badge:SetPoint("LEFT", row, "LEFT", 4, 0)
+    badge:SetColorTexture(0.12, 0.12, 0.12, 0.9)
+
+    local numLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    numLbl:SetSize(22, 22)
+    numLbl:SetPoint("CENTER", badge, "CENTER", 0, 0)
+    numLbl:SetTextColor(0.6, 0.6, 1)
+    row._numLbl = numLbl
+
+    -- Spec icon
+    local ico = row:CreateTexture(nil, "ARTWORK")
+    ico:SetSize(32, 32)
+    ico:SetPoint("LEFT", row, "LEFT", 30, 0)
+    ico:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    row._icon = ico
+
+    -- Spec name
+    local specNameLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    specNameLbl:SetPoint("TOPLEFT",  ico, "TOPRIGHT",  8, -3)
+    specNameLbl:SetPoint("TOPRIGHT", row, "TOPRIGHT", -28, -3)
+    specNameLbl:SetJustifyH("LEFT")
+    row._specName = specNameLbl
+
+    -- Loadout name (smaller, dimmer)
+    local loadoutLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    loadoutLbl:SetPoint("BOTTOMLEFT",  ico, "BOTTOMRIGHT",  8, 4)
+    loadoutLbl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -28, 4)
+    loadoutLbl:SetJustifyH("LEFT")
+    row._loadout = loadoutLbl
+
+    -- Checkmark shown only for the current spec+loadout
+    local check = row:CreateTexture(nil, "OVERLAY")
+    check:SetSize(16, 16)
+    check:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+    check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+    check:Hide()
+    row._check = check
+
+    row:SetScript("OnClick", function() PR:OnAccept(row._rowIdx) end)
+
+    rowPool[index] = row
+    return row
+end
+
 local function BuildRows(assignments)
     ClearRows()
 
@@ -202,9 +273,20 @@ local function BuildRows(assignments)
     local currentLoadoutID = AnySpec.SpecManager:GetCurrentLoadoutConfigID()
     local rowsTopOffset    = PADDING + HEADER_H + SEP_H + 8
 
+    local shown = 0
     for i, a in ipairs(assignments) do
         local specInfo = AnySpec.SpecManager:GetSpecInfo(a.specIndex)
         if specInfo then
+            shown = shown + 1
+            local row = AcquireProposalRow(shown)
+
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", toast, "TOPLEFT", PADDING,
+                         -(rowsTopOffset + (i - 1) * (ROW_H + ROW_GAP)))
+            row:SetAlpha(1)          -- reset (OnAccept dims non-chosen rows)
+            row:EnableMouse(true)    -- reset (OnAccept/SetRowsEnabled may disable)
+            row._rowIdx = i
+
             -- Resolve loadout display name
             local loadoutName = nil
             if a.loadoutID then
@@ -217,72 +299,28 @@ local function BuildRows(assignments)
             local loadoutMatch = (a.loadoutID == currentLoadoutID)  -- nil==nil is true (both default)
             local isCurrent    = specMatch and loadoutMatch
 
-            local row = CreateFrame("Button", nil, toast)
-            row:SetSize(TOAST_W - PADDING * 2, ROW_H)
-            row:SetPoint("TOPLEFT", toast, "TOPLEFT", PADDING,
-                         -(rowsTopOffset + (i - 1) * (ROW_H + ROW_GAP)))
-            row:RegisterForClicks("LeftButtonUp")
+            row._bg:SetShown(isCurrent)
+            row._check:SetShown(isCurrent)
 
-            -- Green tint for the row matching current spec
+            row._numLbl:SetText(tostring(i))
+            row._icon:SetTexture(specInfo.icon)
+
+            row._specName:SetText(specInfo.name)
             if isCurrent then
-                local rowBg = row:CreateTexture(nil, "BACKGROUND")
-                rowBg:SetAllPoints()
-                rowBg:SetColorTexture(0.07, 0.32, 0.07, 0.4)
-            end
-
-            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-
-            -- Number badge
-            local badge = row:CreateTexture(nil, "BACKGROUND")
-            badge:SetSize(22, 22)
-            badge:SetPoint("LEFT", row, "LEFT", 4, 0)
-            badge:SetColorTexture(0.12, 0.12, 0.12, 0.9)
-
-            local numLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-            numLbl:SetSize(22, 22)
-            numLbl:SetPoint("CENTER", badge, "CENTER", 0, 0)
-            numLbl:SetText(tostring(i))
-            numLbl:SetTextColor(0.6, 0.6, 1)
-
-            -- Spec icon
-            local ico = row:CreateTexture(nil, "ARTWORK")
-            ico:SetSize(32, 32)
-            ico:SetPoint("LEFT", row, "LEFT", 30, 0)
-            ico:SetTexture(specInfo.icon)
-            ico:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-
-            -- Spec name (green when current)
-            local specNameLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            specNameLbl:SetPoint("TOPLEFT",  ico, "TOPRIGHT",  8, -3)
-            specNameLbl:SetPoint("TOPRIGHT", row, "TOPRIGHT", -28, -3)
-            specNameLbl:SetJustifyH("LEFT")
-            specNameLbl:SetText(specInfo.name)
-            specNameLbl:SetTextColor(isCurrent and 0.2 or 1, isCurrent and 1 or 1, isCurrent and 0.2 or 1)
-
-            -- Loadout name (smaller, dimmer)
-            local loadoutLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            loadoutLbl:SetPoint("BOTTOMLEFT",  ico, "BOTTOMRIGHT",  8, 4)
-            loadoutLbl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -28, 4)
-            loadoutLbl:SetJustifyH("LEFT")
-            if loadoutName and loadoutName ~= "" then
-                loadoutLbl:SetText(loadoutName)
-                loadoutLbl:SetTextColor(0.62, 0.62, 0.62)
+                row._specName:SetTextColor(0.2, 1, 0.2)
             else
-                loadoutLbl:SetText(L["LOADOUT_DEFAULT"])
-                loadoutLbl:SetTextColor(0.35, 0.35, 0.35)
+                row._specName:SetTextColor(1, 1, 1)
             end
 
-            -- Checkmark for current spec
-            if isCurrent then
-                local check = row:CreateTexture(nil, "OVERLAY")
-                check:SetSize(16, 16)
-                check:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-                check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+            if loadoutName and loadoutName ~= "" then
+                row._loadout:SetText(loadoutName)
+                row._loadout:SetTextColor(0.62, 0.62, 0.62)
+            else
+                row._loadout:SetText(L["LOADOUT_DEFAULT"])
+                row._loadout:SetTextColor(0.35, 0.35, 0.35)
             end
 
-            local rowIdx = i
-            row:SetScript("OnClick", function() PR:OnAccept(rowIdx) end)
-
+            row:Show()
             tinsert(proposalRows, row)
         end
     end
