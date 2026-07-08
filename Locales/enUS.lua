@@ -18,12 +18,28 @@ L["QUICKACCESS_SWITCH_TIP"]     = "Opens a popup to choose any specialization."
 
 -- ── Navigation (left panel links) ─────────────────────────────────────────────
 L["NAV_TITLE"]                  = "Navigate"
-L["NAV_LOCATIONS"]              = "> Content Assignments"
+L["NAV_LOCATIONS"]              = "> Instances"
+L["NAV_CONTENT_TYPES"]          = "> Content Types"
 L["NAV_SETTINGS"]               = "> Settings"
 
 -- ── View titles ───────────────────────────────────────────────────────────────
-L["VIEW_LOCATIONS"]             = "Content Assignments"
+L["VIEW_LOCATIONS"]             = "Instance Assignments"
+L["VIEW_CONTENT_TYPES"]         = "Content Type Assignments"
 L["VIEW_SETTINGS"]              = "Settings"
+
+-- ── Content Types view ─────────────────────────────────────────────────────────
+L["CONTENT_TYPES_DESC"]         = "Set a default spec for a whole content type, or override it per difficulty. Per-instance assignments take priority over these."
+L["CAT_OPEN_WORLD"]             = "Open World"
+L["CAT_DUNGEON"]                = "Dungeon"
+L["CAT_MYTHIC_PLUS"]            = "Mythic+"
+L["CAT_RAID"]                   = "Raid"
+L["CAT_DELVE"]                  = "Delve"
+L["CAT_PVP"]                    = "Battleground"
+L["CAT_ARENA"]                  = "Arena"
+L["DIFF_NORMAL"]                = "Normal"
+L["DIFF_HEROIC"]                = "Heroic"
+L["DIFF_MYTHIC"]                = "Mythic"
+L["DIFF_LFR"]                   = "Raid Finder"
 
 -- ── Instance list (right panel – Locations view) ──────────────────────────────
 L["TAB_DUNGEONS"]               = "Dungeons"

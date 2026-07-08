@@ -36,7 +36,11 @@ local viewContainer  = nil          -- container for switchable views
 -- Assignment dialog state
 local assignmentDialog    = nil   -- modal dialog frame (created once in Init)
 local dialogRows          = {}    -- pair-row frames currently in the dialog
-local currentDialogInstID = nil   -- instanceID the dialog is currently open for
+-- The dialog edits an arbitrary assignment target so it can be reused for
+-- per-instance, per-category and per-category+difficulty assignments alike.
+--   { tbl = <assignments subtable>, key = <instanceID | category | "cat:diff">,
+--     title = <string>, onSaved = <fn|nil> }
+local currentDialogTarget = nil
 local instanceRowRefreshFns = {}  -- [instanceID] = fn(), refreshes the row button text
 
 ------------------------------------------------------------
@@ -154,13 +158,16 @@ local function GetInstances(tierIndex, isRaid)
 end
 
 ------------------------------------------------------------
--- Per-instance assignment: summary helpers
+-- Assignment summary helpers
+--
+-- All work on a (tbl, key) target so the same code serves per-instance,
+-- per-category and per-category+difficulty assignments.
 ------------------------------------------------------------
 
--- Returns display text for the instance row button ("None" or "Holy, Protection").
--- Loadout names are shown only in the tooltip (via CreateAssignButton).
-local function GetAssignmentSummary(instanceID)
-    local asgn = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
+-- Returns display text for an assignment button ("None" or "Holy, Protection").
+-- Loadout names are shown only in the tooltip (GetAssignmentTooltip).
+local function GetAssignmentSummary(tbl, key)
+    local asgn = tbl and tbl[key]
     if not asgn or #asgn == 0 then
         return L["ASSIGNMENT_NONE"]
     end
@@ -169,12 +176,12 @@ local function GetAssignmentSummary(instanceID)
         local info = AnySpec.SpecManager:GetSpecInfo(pair.specIndex)
         if info then tinsert(parts, info.name) end
     end
-    return #parts > 0 and table.concat(parts, ", ") or "|cff555555None|r"
+    return #parts > 0 and table.concat(parts, ", ") or L["ASSIGNMENT_NONE"]
 end
 
 -- Builds a multi-line tooltip string with full spec+loadout details.
-local function GetAssignmentTooltip(instanceID)
-    local asgn = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
+local function GetAssignmentTooltip(tbl, key)
+    local asgn = tbl and tbl[key]
     if not asgn or #asgn == 0 then return nil end
     local lines = {}
     for i, pair in ipairs(asgn) do
@@ -212,16 +219,13 @@ local function GetLoadoutItemsForSpec(specIndex)
 end
 
 local function SaveDialogAssignments()
-    if not currentDialogInstID then
-        return
-    end
-    local charDB = AnySpec.charDB
-    if not charDB then
+    local target = currentDialogTarget
+    if not target or not target.tbl then
         return
     end
 
     local pairs = {}
-    for i, r in ipairs(dialogRows) do
+    for _, r in ipairs(dialogRows) do
         local specVal = r.specDD:GetSelected()
         if specVal then
             local loadoutVal = r.loadoutDD:GetSelected()
@@ -230,13 +234,12 @@ local function SaveDialogAssignments()
     end
 
     if #pairs == 0 then
-        charDB.instanceAssignments[currentDialogInstID] = nil
+        target.tbl[target.key] = nil
     else
-        charDB.instanceAssignments[currentDialogInstID] = pairs
+        target.tbl[target.key] = pairs
     end
 
-    local fn = instanceRowRefreshFns[currentDialogInstID]
-    if fn then fn() end
+    if target.onSaved then target.onSaved() end
 end
 
 local function ResizeDialog()
@@ -436,9 +439,10 @@ local function CreateAssignmentDialog()
     return d
 end
 
--- Opens (or re-populates) the assignment dialog for the given instance.
-local function OpenAssignmentDialog(instanceID, instanceName)
-    if not assignmentDialog then
+-- Opens (or re-populates) the assignment dialog for the given target.
+-- target = { tbl, key, title, onSaved }
+local function OpenAssignmentDialog(target)
+    if not assignmentDialog or not target then
         return
     end
 
@@ -449,13 +453,13 @@ local function OpenAssignmentDialog(instanceID, instanceName)
     end
     wipe(dialogRows)
 
-    currentDialogInstID = instanceID
-    assignmentDialog._title:SetText(instanceName or L["DIALOG_INSTANCE_FALLBACK"])
+    currentDialogTarget = target
+    assignmentDialog._title:SetText(target.title or L["DIALOG_INSTANCE_FALLBACK"])
 
     -- Populate from saved data
-    local saved = AnySpec.charDB and AnySpec.charDB.instanceAssignments[instanceID]
+    local saved = target.tbl and target.tbl[target.key]
     if saved and #saved > 0 then
-        for i, pair in ipairs(saved) do
+        for _, pair in ipairs(saved) do
             AddDialogRow(pair.specIndex, pair.loadoutID)
         end
     end
@@ -515,10 +519,19 @@ local function AcquireInstanceRow(index)
     ab:SetPoint("RIGHT",  row, "RIGHT",  -6, 0)
     ab:SetPoint("CENTER", row, "CENTER", (BTN_WIDTH / 2 + 6), 0)
     ab:SetScript("OnClick", function()
-        OpenAssignmentDialog(row._instanceID, row._instanceName)
+        local instId = row._instanceID
+        OpenAssignmentDialog({
+            tbl   = AnySpec.charDB.instanceAssignments,
+            key   = instId,
+            title = row._instanceName,
+            onSaved = function()
+                local fn = instanceRowRefreshFns[instId]
+                if fn then fn() end
+            end,
+        })
     end)
     ab:SetScript("OnEnter", function(self)
-        local tip = GetAssignmentTooltip(row._instanceID)
+        local tip = GetAssignmentTooltip(AnySpec.charDB.instanceAssignments, row._instanceID)
         if tip then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText(row._instanceName or "", 1, 1, 1)
@@ -588,9 +601,9 @@ local function RebuildInstanceList(tierIndex, isRaid)
             row._instanceID   = instId
             row._instanceName = inst.name
             instanceRowRefreshFns[instId] = function()
-                row._assignBtn:SetText(GetAssignmentSummary(instId))
+                row._assignBtn:SetText(GetAssignmentSummary(AnySpec.charDB.instanceAssignments, instId))
             end
-            row._assignBtn:SetText(GetAssignmentSummary(instId))
+            row._assignBtn:SetText(GetAssignmentSummary(AnySpec.charDB.instanceAssignments, instId))
 
             row:Show()
             y = y - ROW_H
@@ -836,7 +849,11 @@ local function CreateMainFrame()
     -- Views will be created as children of viewContainer
     local views     = {}
     local navLinks  = {}  -- keyed by viewName, value = btn
-    local viewNames = { locations = L["VIEW_LOCATIONS"], settings = L["VIEW_SETTINGS"] }
+    local viewNames = {
+        locations     = L["VIEW_LOCATIONS"],
+        content_types = L["VIEW_CONTENT_TYPES"],
+        settings      = L["VIEW_SETTINGS"],
+    }
 
     -- Switch to a view
     local function ShowView(viewName)
@@ -1023,6 +1040,114 @@ local function CreateMainFrame()
     end
 
     ----========════════════════════════════════════════════════
+    -- CONTENT TYPES VIEW (per-category / per-difficulty defaults)
+    ----========════════════════════════════════════════════════
+    local function CreateContentTypesView()
+        local view = CreateFrame("Frame", nil, viewContainer)
+        view:SetPoint("TOPLEFT",     viewContainer, "TOPLEFT",     0, -(VIEW_TITLE_H + 1))
+        view:SetPoint("BOTTOMRIGHT", viewContainer, "BOTTOMRIGHT", 0, 0)
+        views.content_types = view
+
+        -- Description
+        local desc = view:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        desc:SetPoint("TOPLEFT",  view, "TOPLEFT",  14, -12)
+        desc:SetPoint("TOPRIGHT", view, "TOPRIGHT", -14, -12)
+        desc:SetJustifyH("LEFT")
+        desc:SetWordWrap(true)
+        desc:SetTextColor(0.55, 0.55, 0.55)
+        desc:SetText(L["CONTENT_TYPES_DESC"])
+
+        -- Scroll list
+        local sf = CreateFrame("ScrollFrame", nil, view, "UIPanelScrollFrameTemplate")
+        sf:SetPoint("TOPLEFT",     view, "TOPLEFT",     4,  -44)
+        sf:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -26, 4)
+        local sc = CreateFrame("Frame", nil, sf)
+        sc:SetSize(1, 1)
+        sf:SetScrollChild(sc)
+        sf:SetScript("OnSizeChanged", function(self, w) sc:SetWidth(w - 4) end)
+
+        -- Categories and their per-difficulty overrides. Difficulty IDs must
+        -- match what GetInstanceInfo() reports at runtime (see ZoneDetector).
+        local CATS = {
+            { key = "open_world",  label = L["CAT_OPEN_WORLD"] },
+            { key = "dungeon",     label = L["CAT_DUNGEON"],
+              diffs = { { id = 1,  label = L["DIFF_NORMAL"] },
+                        { id = 2,  label = L["DIFF_HEROIC"] },
+                        { id = 23, label = L["DIFF_MYTHIC"] } } },
+            { key = "mythic_plus", label = L["CAT_MYTHIC_PLUS"] },
+            { key = "raid",        label = L["CAT_RAID"],
+              diffs = { { id = 17, label = L["DIFF_LFR"] },
+                        { id = 14, label = L["DIFF_NORMAL"] },
+                        { id = 15, label = L["DIFF_HEROIC"] },
+                        { id = 16, label = L["DIFF_MYTHIC"] } } },
+            { key = "delve",       label = L["CAT_DELVE"] },
+            { key = "pvp",         label = L["CAT_PVP"] },
+            { key = "arena",       label = L["CAT_ARENA"] },
+        }
+
+        local ASSIGN_BTN_W = 150
+        local y = -6
+
+        local function MakeAssignRow(labelText, indent, tbl, key, titleText, isHeader)
+            local row = CreateFrame("Frame", nil, sc)
+            row:SetPoint("TOPLEFT",  sc, "TOPLEFT",  0, y)
+            row:SetPoint("TOPRIGHT", sc, "TOPRIGHT", 0, y)
+            row:SetHeight(28)
+
+            if isHeader then
+                local bg = row:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints()
+                bg:SetColorTexture(0.14, 0.14, 0.14, 0.4)
+            end
+
+            local lbl = row:CreateFontString(nil, "OVERLAY",
+                isHeader and "GameFontNormal" or "GameFontNormalSmall")
+            lbl:SetPoint("LEFT", row, "LEFT", 10 + indent, 0)
+            lbl:SetText(labelText)
+            lbl:SetTextColor(isHeader and 0.9 or 0.65, isHeader and 0.9 or 0.65, isHeader and 0.9 or 0.65)
+
+            local btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            btn:SetSize(ASSIGN_BTN_W, 20)
+            btn:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+
+            local function Refresh() btn:SetText(GetAssignmentSummary(tbl, key)) end
+            Refresh()
+
+            btn:SetScript("OnClick", function()
+                OpenAssignmentDialog({ tbl = tbl, key = key, title = titleText, onSaved = Refresh })
+            end)
+            btn:SetScript("OnEnter", function(self)
+                local tip = GetAssignmentTooltip(tbl, key)
+                if tip then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetText(titleText, 1, 1, 1)
+                    GameTooltip:AddLine(tip, 0.8, 0.8, 0.8, false)
+                    GameTooltip:Show()
+                end
+            end)
+            btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            y = y - 30
+        end
+
+        local catTbl  = AnySpec.charDB.categoryAssignments
+        local diffTbl = AnySpec.charDB.difficultyAssignments
+        for _, c in ipairs(CATS) do
+            MakeAssignRow(c.label, 0, catTbl, c.key, c.label, true)
+            if c.diffs then
+                for _, d in ipairs(c.diffs) do
+                    MakeAssignRow(d.label, 20, diffTbl, c.key .. ":" .. d.id,
+                        c.label .. " \124cff888888" .. d.label .. "\124r", false)
+                end
+            end
+        end
+
+        sc:SetHeight(math.max(1, -y + 6))
+        view:Hide()
+        return view
+    end
+
+    ----========════════════════════════════════════════════════
     -- LEFT PANEL (Persistent: drag buttons + view links)
     ----========════════════════════════════════════════════════
     local leftPanel = CreateFrame("Frame", nil, f)
@@ -1126,7 +1251,10 @@ local function CreateMainFrame()
     
     CreateViewLink(L["NAV_LOCATIONS"], "locations", y)
     y = y - 28
-    
+
+    CreateViewLink(L["NAV_CONTENT_TYPES"], "content_types", y)
+    y = y - 28
+
     CreateViewLink(L["NAV_SETTINGS"], "settings", y)
     
     -- Vertical divider
@@ -1140,6 +1268,7 @@ local function CreateMainFrame()
     -- INITIALIZE VIEWS
     ----========════════════════════════════════════════════════
     CreateLocationsView()
+    CreateContentTypesView()
     CreateSettingsView()
     ShowView("locations")
 

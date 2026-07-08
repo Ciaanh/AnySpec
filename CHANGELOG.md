@@ -5,6 +5,18 @@ All notable changes to AnySpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Content-type assignments: set a default spec/loadout per content type (Open World, Dungeon, Mythic+, Raid, Delve, Battleground, Arena) with optional per-difficulty overrides, in a new "Content Types" panel. Per-instance assignments still take priority.
+
+### Fixed
+- Auto-switch proposals now match raids (not only dungeons) and resolve the current instance reliably; the Encounter Journal lookup is cached instead of rescanned on every zone change.
+- Quick-switch now reports spec-switch failures (e.g. in combat) instead of failing silently.
+
+### Changed
+- Instance list, proposal toast, and quick-switch rows are pooled and reused to avoid leaking UI frames over a session.
+
 ## [0.1.0] - 2026-03-03
 
 ### Added
