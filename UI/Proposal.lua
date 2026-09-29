@@ -8,18 +8,20 @@ AnySpec.UI = AnySpec.UI or {}
 AnySpec.UI.Proposal = AnySpec.UI.Proposal or {}
 local PR = AnySpec.UI.Proposal
 local L  = AnySpec.L
+local T  = AnySpec.UI.Theme
+local W  = AnySpec.UI.Widgets
+local C  = T.C
 
 ------------------------------------------------------------
 -- Layout constants
 ------------------------------------------------------------
-local TOAST_W          = 360
-local PADDING          = 10
-local HEADER_H         = 26
-local SEP_H            = 1
+local TOAST_W          = 380
+local PADDING          = 12
+local HEADER_H         = 44
 local ROW_H            = 50
-local ROW_GAP          = 3
-local TIMER_H          = 4
-local HINT_H           = 18
+local ROW_GAP          = 6
+local TIMER_H          = 3
+local HINT_H           = 16
 local FADE_DURATION    = 0.25
 local PROPOSAL_TIMEOUT = 8      -- seconds; expiry does NOT set dismiss cooldown
 
@@ -92,51 +94,47 @@ local function CreateToast()
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetClampedToScreen(true)
     f:Hide()
+    T:Surface(f, C.window, C.border)
 
-    f:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-
-    -- Instance name header
-    local header = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    header:SetPoint("TOPLEFT",  f, "TOPLEFT",  PADDING, -PADDING)
-    header:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADDING, -PADDING)
-    header:SetJustifyH("LEFT")
+    -- Instance name + current spec line
+    local header = T:Text(f, 17, C.text)
+    header:SetPoint("TOPLEFT",  f, "TOPLEFT",  PADDING + 2, -PADDING - 2)
+    header:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADDING - 34, -PADDING - 2)
     f._header = header
 
-    -- Separator below header
-    local sep = f:CreateTexture(nil, "ARTWORK")
-    sep:SetHeight(SEP_H)
-    sep:SetPoint("TOPLEFT",  f, "TOPLEFT",  PADDING,  -(PADDING + HEADER_H + 2))
-    sep:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PADDING, -(PADDING + HEADER_H + 2))
-    sep:SetColorTexture(0.3, 0.3, 0.35, 0.8)
+    local subtitle = T:Text(f, 13, C.muted)
+    subtitle:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -4)
+    subtitle:SetPoint("RIGHT", header, "RIGHT", 0, 0)
+    f._subtitle = subtitle
 
-    -- Timer bar background
+    local closeBtn = W.CreateIconButton(f, "close", 28)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -8)
+    closeBtn:SetScript("OnClick", function() PR:OnDismiss() end)
+
+    -- Timer bar along the bottom edge (shrinks as time runs out)
     local timerBg = f:CreateTexture(nil, "ARTWORK")
     timerBg:SetHeight(TIMER_H)
-    timerBg:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  PADDING,  PADDING)
-    timerBg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -PADDING, PADDING)
-    timerBg:SetColorTexture(0.15, 0.15, 0.15, 0.6)
+    timerBg:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  1, 1)
+    timerBg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
+    timerBg:SetColorTexture(T.RGBA(C.surfaceHi))
     f._timerBg = timerBg
 
-    -- Timer bar fill (shrinks left→right as time runs out)
     local timerFill = f:CreateTexture(nil, "OVERLAY")
     timerFill:SetHeight(TIMER_H)
     timerFill:SetPoint("TOPLEFT",    timerBg, "TOPLEFT",    0, 0)
     timerFill:SetPoint("BOTTOMLEFT", timerBg, "BOTTOMLEFT", 0, 0)
-    timerFill:SetColorTexture(0.05, 0.65, 1, 0.85)
+    timerFill:SetColorTexture(T:GetAccent())
     f._timerFill = timerFill
 
-    -- Hint text (only shown when 2+ rows)
-    local hint = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hint:SetPoint("BOTTOM", f, "BOTTOM", 0, PADDING + TIMER_H + 4)
-    hint:SetJustifyH("CENTER")
-    hint:SetTextColor(0.4, 0.4, 0.4)
-    hint:Hide()
+    -- Footer: key hint (left) + seconds remaining (right)
+    local hint = T:Text(f, 12, C.faint)
+    hint:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", PADDING + 2, TIMER_H + 9)
     f._hint = hint
+
+    local secs = T:Text(f, 12, C.faint)
+    secs:SetJustifyH("RIGHT")
+    secs:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -PADDING - 2, TIMER_H + 9)
+    f._secs = secs
 
     -- Keyboard handling
     f:EnableKeyboard(false)
@@ -179,8 +177,9 @@ local function CreateToast()
         if not state.timerRunning then return end
         state.timerElapsed = state.timerElapsed + dt
         local fraction = 1 - math.min(state.timerElapsed / PROPOSAL_TIMEOUT, 1)
-        local barW = self._timerBg:GetWidth() or (TOAST_W - PADDING * 2)
+        local barW = self._timerBg:GetWidth() or (TOAST_W - 2)
         self._timerFill:SetWidth(math.max(0.1, barW * fraction))
+        self._secs:SetText(math.ceil(PROPOSAL_TIMEOUT - state.timerElapsed) .. "s")
 
         if state.timerElapsed >= PROPOSAL_TIMEOUT then
             state.timerRunning = false
@@ -200,7 +199,8 @@ local function BuildRows(assignments)
 
     local currentSpec      = AnySpec.SpecManager:GetCurrentSpecIndex()
     local currentLoadoutID = AnySpec.SpecManager:GetCurrentLoadoutConfigID()
-    local rowsTopOffset    = PADDING + HEADER_H + SEP_H + 8
+    local rowsTopOffset    = PADDING + HEADER_H + 8
+    local ar, ag, ab       = T:GetAccent()
 
     for i, a in ipairs(assignments) do
         local specInfo = AnySpec.SpecManager:GetSpecInfo(a.specIndex)
@@ -217,67 +217,66 @@ local function BuildRows(assignments)
             local loadoutMatch = (a.loadoutID == currentLoadoutID)  -- nil==nil is true (both default)
             local isCurrent    = specMatch and loadoutMatch
 
-            local row = CreateFrame("Button", nil, toast)
+            local row = CreateFrame("Button", nil, toast, "BackdropTemplate")
             row:SetSize(TOAST_W - PADDING * 2, ROW_H)
             row:SetPoint("TOPLEFT", toast, "TOPLEFT", PADDING,
                          -(rowsTopOffset + (i - 1) * (ROW_H + ROW_GAP)))
             row:RegisterForClicks("LeftButtonUp")
 
-            -- Green tint for the row matching current spec
-            if isCurrent then
-                local rowBg = row:CreateTexture(nil, "BACKGROUND")
-                rowBg:SetAllPoints()
-                rowBg:SetColorTexture(0.07, 0.32, 0.07, 0.4)
+            local function Paint(hover)
+                if isCurrent then
+                    T:Surface(row, C.selected, { ar * 0.55, ag * 0.55, ab * 0.55, 1 })
+                else
+                    T:Surface(row, hover and C.surfaceHi or C.surface, hover and C.borderHi or C.border)
+                end
             end
+            Paint(false)
+            row:SetScript("OnEnter", function() Paint(true) end)
+            row:SetScript("OnLeave", function() Paint(false) end)
 
-            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-
-            -- Number badge
-            local badge = row:CreateTexture(nil, "BACKGROUND")
-            badge:SetSize(22, 22)
-            badge:SetPoint("LEFT", row, "LEFT", 4, 0)
-            badge:SetColorTexture(0.12, 0.12, 0.12, 0.9)
-
-            local numLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-            numLbl:SetSize(22, 22)
-            numLbl:SetPoint("CENTER", badge, "CENTER", 0, 0)
+            -- Number badge (accent on the first option)
+            local badge = CreateFrame("Frame", nil, row, "BackdropTemplate")
+            badge:SetSize(24, 24)
+            badge:SetPoint("LEFT", row, "LEFT", 10, 0)
+            local numLbl = T:Text(badge, 13, i == 1 and C.onAccent or C.textDim)
+            numLbl:SetJustifyH("CENTER")
+            numLbl:SetPoint("CENTER")
             numLbl:SetText(tostring(i))
-            numLbl:SetTextColor(0.6, 0.6, 1)
+            if i == 1 then
+                T:Surface(badge, { ar, ag, ab, 1 }, { ar, ag, ab, 1 })
+            else
+                T:Surface(badge, C.surfaceHi, C.borderHi)
+            end
 
             -- Spec icon
-            local ico = row:CreateTexture(nil, "ARTWORK")
-            ico:SetSize(32, 32)
-            ico:SetPoint("LEFT", row, "LEFT", 30, 0)
-            ico:SetTexture(specInfo.icon)
-            ico:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            local ico = T:Icon(row, 34, specInfo.icon)
+            ico:SetPoint("LEFT", badge, "RIGHT", 10, 0)
 
-            -- Spec name (green when current)
-            local specNameLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            specNameLbl:SetPoint("TOPLEFT",  ico, "TOPRIGHT",  8, -3)
-            specNameLbl:SetPoint("TOPRIGHT", row, "TOPRIGHT", -28, -3)
-            specNameLbl:SetJustifyH("LEFT")
+            -- Spec name
+            local specNameLbl = T:Text(row, 15, C.text)
+            specNameLbl:SetPoint("TOPLEFT",  ico, "TOPRIGHT",  10, -1)
+            specNameLbl:SetPoint("RIGHT", row, "RIGHT", -80, 0)
             specNameLbl:SetText(specInfo.name)
-            specNameLbl:SetTextColor(isCurrent and 0.2 or 1, isCurrent and 1 or 1, isCurrent and 0.2 or 1)
 
             -- Loadout name (smaller, dimmer)
-            local loadoutLbl = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            loadoutLbl:SetPoint("BOTTOMLEFT",  ico, "BOTTOMRIGHT",  8, 4)
-            loadoutLbl:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -28, 4)
-            loadoutLbl:SetJustifyH("LEFT")
+            local loadoutLbl = T:Text(row, 13, C.muted)
+            loadoutLbl:SetPoint("BOTTOMLEFT",  ico, "BOTTOMRIGHT",  10, 1)
+            loadoutLbl:SetPoint("RIGHT", row, "RIGHT", -80, 0)
             if loadoutName and loadoutName ~= "" then
                 loadoutLbl:SetText(loadoutName)
-                loadoutLbl:SetTextColor(0.62, 0.62, 0.62)
             else
                 loadoutLbl:SetText(L["LOADOUT_DEFAULT"])
-                loadoutLbl:SetTextColor(0.35, 0.35, 0.35)
             end
 
-            -- Checkmark for current spec
+            -- "Current" tag or chevron
             if isCurrent then
-                local check = row:CreateTexture(nil, "OVERLAY")
-                check:SetSize(16, 16)
-                check:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-                check:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+                local tag = T:Text(row, 12, { ar, ag, ab, 1 })
+                tag:SetJustifyH("RIGHT")
+                tag:SetPoint("RIGHT", row, "RIGHT", -12, 0)
+                tag:SetText(L["PROPOSAL_CURRENT"])
+            else
+                local chev = T:Glyph(row, "chevron-right", 12, C.faint)
+                chev:SetPoint("RIGHT", row, "RIGHT", -12, 0)
             end
 
             local rowIdx = i
@@ -311,6 +310,9 @@ end
 ------------------------------------------------------------
 function PR:Init()
     toast = CreateToast()
+    if AnySpec.db and AnySpec.db.toastPosition then
+        PR:SetPosition(AnySpec.db.toastPosition)
+    end
 end
 
 function PR:SetPosition(position)
@@ -343,32 +345,31 @@ function PR:Show(assignments, zoneInfo)
     currentZoneInfo    = zoneInfo
 
     local numRows  = #assignments
-    local showHint = (numRows >= 2)
 
     -- Toast height
     local rowsH  = numRows * ROW_H + math.max(0, numRows - 1) * ROW_GAP
-    local hintH  = showHint and (HINT_H + 4) or 0
-    local totalH = PADDING + HEADER_H + SEP_H + 8 + rowsH + 8 + hintH + TIMER_H + PADDING
+    local totalH = PADDING + HEADER_H + 8 + rowsH + 12 + HINT_H + 8 + TIMER_H + 1
     toast:SetSize(TOAST_W, totalH)
     AnchorToastFrame(toast, currentPosition)
 
     toast._header:SetText(zoneInfo.instanceName or zoneInfo.category or "")
+    local curSpec  = AnySpec.SpecManager:GetCurrentSpecIndex()
+    local curInfo  = curSpec and AnySpec.SpecManager:GetSpecInfo(curSpec)
+    toast._subtitle:SetText(curInfo
+        and string.format(L["PROPOSAL_SUBTITLE"], "|cffffffff" .. curInfo.name .. "|r")
+        or "")
 
     BuildRows(assignments)
 
-    if showHint then
-        local keys = {}
-        for i = 1, numRows do tinsert(keys, tostring(i)) end
-        toast._hint:SetText(string.format(L["PROPOSAL_HINT"], table.concat(keys, "-")))
-        toast._hint:Show()
-    else
-        toast._hint:Hide()
-    end
+    local keys = {}
+    for i = 1, numRows do tinsert(keys, tostring(i)) end
+    toast._hint:SetText(string.format(L["PROPOSAL_HINT"], table.concat(keys, "-")))
+    toast._secs:SetText(PROPOSAL_TIMEOUT .. "s")
 
     -- Start timer bar at full width
     state.timerElapsed = 0
     state.timerRunning = true
-    toast._timerFill:SetWidth(TOAST_W - PADDING * 2)
+    toast._timerFill:SetWidth(TOAST_W - 2)
 
     toast:EnableKeyboard(true)
     StartFadeIn()
@@ -403,6 +404,7 @@ function PR:OnAccept(idx)
     end
 
     toast._header:SetText(string.format(L["PROPOSAL_SWITCHING"], label))
+    toast._subtitle:SetText("")
     currentAssignments = nil
     currentZoneInfo    = nil
     C_Timer.After(3, function()
