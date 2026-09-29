@@ -5,3 +5,4 @@ docs
 tmpclaude-*
 .build/
 AnySpec/
+dist/
