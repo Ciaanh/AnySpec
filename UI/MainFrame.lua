@@ -70,10 +70,20 @@ local quickAccessIcon = nil
 ------------------------------------------------------------
 local MACRO_TAG = "#anyspec"
 
+-- MAX_*_MACROS are defined by Blizzard_MacroUI, which loads on demand:
+-- load it if needed and fall back to the current retail limits.
+local function MacroLimits()
+    if not MAX_ACCOUNT_MACROS and C_AddOns and C_AddOns.LoadAddOn then
+        pcall(C_AddOns.LoadAddOn, "Blizzard_MacroUI")
+    end
+    return MAX_ACCOUNT_MACROS or 120, MAX_CHARACTER_MACROS or 30
+end
+
 local function AcquireMacro(command, name, icon, clickTarget)
     if InCombatLockdown() then return nil end
+    local maxAccount, maxChar = MacroLimits()
     local _, numChar = GetNumMacros()
-    local base = MAX_ACCOUNT_MACROS + 1
+    local base = maxAccount + 1
     for idx = base, base + numChar - 1 do
         local body = GetMacroBody(idx)
         if body then
@@ -81,7 +91,7 @@ local function AcquireMacro(command, name, icon, clickTarget)
             if tag == command then return idx end
         end
     end
-    if numChar < MAX_CHARACTER_MACROS then
+    if numChar < maxChar then
         local body = MACRO_TAG .. ":" .. command .. "\n/click " .. clickTarget
         return CreateMacro(name, icon, body, true)
     end
