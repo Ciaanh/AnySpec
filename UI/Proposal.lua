@@ -445,7 +445,7 @@ function PR:Hide()
     self:_HideNoCD()
 end
 
--- Called when combat starts while toast is visible
+-- Called when the spec-switch cast fails (SPECIALIZATION_CHANGE_CAST_FAILED).
 function PR:OnSpecSwitchFailed()
     if not toast or not toast:IsShown() then return end
     toast._header:SetText("|cffff4444" .. L["PROPOSAL_SWITCH_FAILED"] .. "|r")

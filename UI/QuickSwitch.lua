@@ -132,12 +132,17 @@ local function CreateSpecRow(parent, specIdx)
         local loadoutToUse = selectedLoadoutsBySpec[specIdx]
         local spec = AnySpec.SpecManager:GetSpecInfo(specIdx)
         local specName = spec and spec.name or tostring(specIdx)
+        local ok, err = AnySpec.SpecManager:SwitchSpec(specIdx, loadoutToUse)
+        if not ok then
+            -- Leave the popup open so the reason (e.g. combat) stays visible.
+            print("|cffff4444" .. L["ADDON_PREFIX"] .. ":|r " .. (err or L["PROPOSAL_SWITCH_FAILED"]))
+            return
+        end
         if loadoutToUse then
             print(string.format(L["QS_SWITCHING_WITH_LOADOUT"], specName))
         else
             print(string.format(L["QS_SWITCHING"], specName))
         end
-        AnySpec.SpecManager:SwitchSpec(specIdx, loadoutToUse)
         QS:Hide()
     end)
 

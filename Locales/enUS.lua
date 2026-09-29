@@ -16,14 +16,30 @@ L["QUICKACCESS_SWITCH_NAME"]    = "Spec Selector"
 L["QUICKACCESS_SWITCH_TIP"]     = "Opens a popup to choose any specialization."
 
 -- ── Navigation (left panel links) ─────────────────────────────────────────────
-L["NAV_LOCATIONS"]              = "Assignments"
+L["NAV_LOCATIONS"]              = "Instances"
+L["NAV_CONTENT_TYPES"]          = "Content types"
 L["NAV_SETTINGS"]               = "Settings"
 
 -- ── View titles ───────────────────────────────────────────────────────────────
-L["VIEW_LOCATIONS"]             = "Content assignments"
+L["VIEW_LOCATIONS"]             = "Instance assignments"
 L["VIEW_LOCATIONS_DESC"]        = "Choose which specs AnySpec offers when you zone in."
+L["VIEW_CONTENT_TYPES"]         = "Content type defaults"
+L["VIEW_CONTENT_TYPES_DESC"]    = "Used when the instance itself has no assignment."
 L["VIEW_SETTINGS"]              = "Settings"
 L["VIEW_SETTINGS_DESC"]         = "Saved for your whole account."
+
+-- ── Content types view ─────────────────────────────────────────────────────────
+L["CAT_OPEN_WORLD"]             = "Open World"
+L["CAT_DUNGEON"]                = "Dungeon"
+L["CAT_MYTHIC_PLUS"]            = "Mythic+"
+L["CAT_RAID"]                   = "Raid"
+L["CAT_DELVE"]                  = "Delve"
+L["CAT_PVP"]                    = "Battleground"
+L["CAT_ARENA"]                  = "Arena"
+L["DIFF_NORMAL"]                = "Normal"
+L["DIFF_HEROIC"]                = "Heroic"
+L["DIFF_MYTHIC"]                = "Mythic"
+L["DIFF_LFR"]                   = "Raid Finder"
 
 -- ── Instance list (right panel – Locations view) ──────────────────────────────
 L["TAB_DUNGEONS"]               = "Dungeons"

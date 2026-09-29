@@ -2,7 +2,9 @@
 -- Custom main configuration window (no Blizzard options panel).
 -- Header  : wordmark, current spec + loadout, close button.
 -- Sidebar : view navigation + drag-to-action-bar Quick Access tile.
--- Views   : "locations" (per-instance spec assignments, edited inline) and "settings".
+-- Views   : "locations" (per-instance spec assignments, edited inline),
+--           "content_types" (per-category / per-difficulty defaults, same inline editor)
+--           and "settings".
 
 AnySpec     = AnySpec     or {}
 AnySpec.UI  = AnySpec.UI  or {}
@@ -38,7 +40,7 @@ local MAX_CHIPS      = 3
 -- Module state
 ------------------------------------------------------------
 local frame          = nil
-local currentView    = "locations"  -- "locations" or "settings"
+local currentView    = "locations"  -- "locations", "content_types" or "settings"
 local currentTab     = "dungeons"   -- "dungeons" or "raids"
 local currentTierIdx = nil          -- nil → default to newest tier on first open
 local tierList       = {}           -- { { index, name }, ... } newest-first
@@ -47,13 +49,16 @@ local instanceCache  = {}           -- ["tier:isRaid"] = instances
 
 local tierDropdown   = nil
 local tabControl     = nil
-local scrollFrame    = nil
-local scrollChild    = nil
 local emptyLabel     = nil
 
-local rowPool        = {}           -- all row frames ever created (reused)
-local activeRows     = {}           -- rows currently displayed, in order
-local expandedID     = nil          -- instanceID whose editor is open
+-- An assignment list: { scrollFrame, scrollChild, pool = {}, active = {} }.
+-- Each row edits one assignment target: AnySpec.charDB[row._tblName][row._key].
+local instList       = nil          -- per-instance rows (pooled, rebuilt per tier/tab/filter)
+local ctList         = nil          -- content type + difficulty rows (static)
+
+local expandedRow    = nil          -- row whose editor is open
+local expTblName     = nil          -- its target, kept so an instance-list rebuild
+local expKey         = nil          --   can find the row again
 local editor         = nil          -- the single shared inline editor
 local editorPairs    = {}           -- working copy: { { specIndex, loadoutID }, ... }
 
@@ -139,9 +144,10 @@ end
 ------------------------------------------------------------
 -- Assignment data helpers
 ------------------------------------------------------------
-local function GetAssignments(instanceID)
+local function GetAssignments(tblName, key)
     local charDB = AnySpec.charDB
-    return charDB and charDB.instanceAssignments[instanceID] or nil
+    local tbl = charDB and charDB[tblName]
+    return (tbl and key ~= nil) and tbl[key] or nil
 end
 
 local function GetLoadoutItemsForSpec(specIndex)
@@ -163,7 +169,7 @@ local function GetSpecItems()
 end
 
 ------------------------------------------------------------
--- Instance list: layout
+-- Assignment lists: layout
 ------------------------------------------------------------
 local function EditorHeight()
     local n = #editorPairs
@@ -172,28 +178,33 @@ local function EditorHeight()
     return h + EDITOR_PAD_B
 end
 
--- Positions every active row top-down and sizes the scroll child.
-local function Relayout()
-    if not scrollChild then return end
+-- Positions every active row of a list top-down and sizes its scroll child.
+local function RelayoutList(list)
+    if not list then return end
     local y = 0
-    for _, row in ipairs(activeRows) do
+    for _, row in ipairs(list.active) do
         local h = ROW_H
-        if row._instanceID == expandedID then h = ROW_H + EditorHeight() end
+        if row == expandedRow then h = ROW_H + EditorHeight() end
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT",  scrollChild, "TOPLEFT",  0, -y)
-        row:SetPoint("TOPRIGHT", scrollChild, "TOPRIGHT", 0, -y)
+        row:SetPoint("TOPLEFT",  list.scrollChild, "TOPLEFT",  0, -y)
+        row:SetPoint("TOPRIGHT", list.scrollChild, "TOPRIGHT", 0, -y)
         row:SetHeight(h)
         y = y + h + ROW_GAP
     end
-    scrollChild:SetHeight(math.max(1, y))
-    scrollFrame:UpdateScroll()
+    list.scrollChild:SetHeight(math.max(1, y))
+    list.scrollFrame:UpdateScroll()
+end
+
+local function Relayout()
+    RelayoutList(instList)
+    RelayoutList(ctList)
 end
 
 ------------------------------------------------------------
--- Instance list: rows
+-- Assignment lists: rows
 ------------------------------------------------------------
 local function PaintRow(row)
-    local expanded = (row._instanceID == expandedID)
+    local expanded = (row == expandedRow)
     if expanded then
         T:Surface(row, C.surface, C.border)
     else
@@ -205,8 +216,8 @@ end
 
 -- Refreshes the chips / "+ Assign" button of a row from saved data.
 local function UpdateRowContent(row)
-    local asgn = GetAssignments(row._instanceID)
-    local expanded = (row._instanceID == expandedID)
+    local asgn = GetAssignments(row._tblName, row._key)
+    local expanded = (row == expandedRow)
     local shown = 0
     local anchor = row._chevRight
     if asgn and not expanded then
@@ -230,8 +241,9 @@ end
 
 local ToggleExpand  -- forward declaration
 
-local function CreateRow()
-    local row = CreateFrame("Frame", nil, scrollChild, "BackdropTemplate")
+local function CreateRow(list)
+    local row = CreateFrame("Frame", nil, list.scrollChild, "BackdropTemplate")
+    row._list = list
     row:SetHeight(ROW_H)
 
     -- Clickable head (top ROW_H px); the editor sits below it when expanded.
@@ -242,7 +254,7 @@ local function CreateRow()
     local hl = head:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
     hl:SetColorTexture(T.RGBA(C.surfaceHi, 0.6))
-    head:SetScript("OnClick", function() ToggleExpand(row._instanceID) end)
+    head:SetScript("OnClick", function() ToggleExpand(row) end)
 
     local ico = T:Icon(head, 28, nil)
     ico:SetPoint("LEFT", head, "LEFT", 10, 0)
@@ -266,7 +278,7 @@ local function CreateRow()
     assignBtn:SetText("|cff9aa1b0+|r  " .. L["ASSIGN_BUTTON"])
     assignBtn:SetPoint("RIGHT", chevRight, "LEFT", -10, 0)
     assignBtn:SetScript("OnClick", function()
-        ToggleExpand(row._instanceID, true)
+        ToggleExpand(row, true)
     end)
     row._assignBtn = assignBtn
 
@@ -278,14 +290,18 @@ local function CreateRow()
     return row
 end
 
-local function AcquireRow(index)
-    local row = rowPool[index]
+local function AcquireRow(list, index)
+    local row = list.pool[index]
     if not row then
-        row = CreateRow()
-        rowPool[index] = row
+        row = CreateRow(list)
+        list.pool[index] = row
     end
     row:Show()
     return row
+end
+
+local function NewList(sf, sc)
+    return { scrollFrame = sf, scrollChild = sc, pool = {}, active = {} }
 end
 
 ------------------------------------------------------------
@@ -294,14 +310,15 @@ end
 local RenderEditor  -- forward declaration
 
 local function SaveEditor()
-    if not expandedID or not AnySpec.charDB then return end
+    local tbl = AnySpec.charDB and expTblName and AnySpec.charDB[expTblName]
+    if not tbl or expKey == nil then return end
     local out = {}
     for _, p in ipairs(editorPairs) do
         if p.specIndex then
             tinsert(out, { specIndex = p.specIndex, loadoutID = p.loadoutID })
         end
     end
-    AnySpec.charDB.instanceAssignments[expandedID] = (#out > 0) and out or nil
+    tbl[expKey] = (#out > 0) and out or nil
 end
 
 local function AddEditorPair(preferredSpec)
@@ -371,7 +388,7 @@ local function CreatePairLine(parent, index)
 end
 
 local function CreateEditor()
-    local ed = CreateFrame("Frame", nil, scrollChild)
+    local ed = CreateFrame("Frame", nil, instList.scrollChild)
     ed:Hide()
 
     local hint = T:Text(ed, 12, C.muted)
@@ -426,48 +443,47 @@ RenderEditor = function()
     editor._addBtn:SetShown(n < MAX_PAIRS)
 end
 
-local function RowFor(instanceID)
-    for _, row in ipairs(activeRows) do
-        if row._instanceID == instanceID then return row end
-    end
+local function AnchorEditor(row)
+    editor:SetParent(row)
+    editor:ClearAllPoints()
+    editor:SetPoint("TOPLEFT",     row, "TOPLEFT",     EDITOR_INDENT, -ROW_H)
+    editor:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -14, 0)
+    editor:Show()
 end
 
--- Expands the row for instanceID (collapsing any other). Clicking the open row collapses it.
--- addIfEmpty: start with one pair (current spec) when the instance has no assignment.
-ToggleExpand = function(instanceID, addIfEmpty)
-    local previous = expandedID
-    if previous == instanceID and not addIfEmpty then
-        expandedID = nil
-    else
-        expandedID = instanceID
+local function CollapseEditor()
+    local prev = expandedRow
+    expandedRow, expTblName, expKey = nil, nil, nil
+    wipe(editorPairs)
+    RenderEditor()  -- closes any open dropdown menu
+    editor:Hide()
+    if prev then UpdateRowContent(prev) end
+end
+
+-- Expands the given row (collapsing any other). Clicking the open row collapses it.
+-- addIfEmpty: start with one pair (current spec) when the target has no assignment.
+ToggleExpand = function(row, addIfEmpty)
+    if row == expandedRow and not addIfEmpty then
+        CollapseEditor()
+        Relayout()
+        return
     end
+
+    local previous = expandedRow
+    expandedRow, expTblName, expKey = row, row._tblName, row._key
+    if previous and previous ~= row then UpdateRowContent(previous) end
 
     wipe(editorPairs)
-    if expandedID then
-        for _, p in ipairs(GetAssignments(expandedID) or {}) do
-            tinsert(editorPairs, { specIndex = p.specIndex, loadoutID = p.loadoutID })
-        end
+    for _, p in ipairs(GetAssignments(expTblName, expKey) or {}) do
+        tinsert(editorPairs, { specIndex = p.specIndex, loadoutID = p.loadoutID })
+    end
+    if addIfEmpty and #editorPairs == 0 then
+        AddEditorPair(AnySpec.SpecManager:GetCurrentSpecIndex())
     end
 
-    local prevRow = previous and RowFor(previous)
-    if prevRow then UpdateRowContent(prevRow) end
-
-    local row = expandedID and RowFor(expandedID)
-    if row then
-        if addIfEmpty and #editorPairs == 0 then
-            AddEditorPair(AnySpec.SpecManager:GetCurrentSpecIndex())
-        end
-        editor:SetParent(row)
-        editor:ClearAllPoints()
-        editor:SetPoint("TOPLEFT",     row, "TOPLEFT",     EDITOR_INDENT, -ROW_H)
-        editor:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -14, 0)
-        RenderEditor()
-        editor:Show()
-        UpdateRowContent(row)
-    else
-        expandedID = nil
-        editor:Hide()
-    end
+    AnchorEditor(row)
+    RenderEditor()
+    UpdateRowContent(row)
     Relayout()
 end
 
@@ -475,43 +491,51 @@ end
 -- Instance list: rebuild for current tab / tier / filter
 ------------------------------------------------------------
 local function RefreshInstanceList()
-    if not frame or not scrollChild then return end
+    if not frame or not instList then return end
     local tIdx = currentTierIdx or (tierList[1] and tierList[1].index)
     if not tIdx then return end
 
     local instances = GetInstances(tIdx, currentTab == "raids")
     local needle = filterText:lower()
+    local editingInstance = expandedRow and expandedRow._list == instList
 
-    wipe(activeRows)
-    local expandedStillVisible = false
+    wipe(instList.active)
+    local expandedNow = nil
     for _, inst in ipairs(instances) do
         if needle == "" or inst.name:lower():find(needle, 1, true) then
-            local row = AcquireRow(#activeRows + 1)
-            row._instanceID = inst.id
+            local row = AcquireRow(instList, #instList.active + 1)
+            row._tblName = "instanceAssignments"
+            row._key = inst.id
             row._name:SetText(inst.name)
             row._icon:SetTexture((inst.icon and inst.icon ~= 0) and inst.icon or 134400)
-            tinsert(activeRows, row)
-            if inst.id == expandedID then expandedStillVisible = true end
+            tinsert(instList.active, row)
+            if editingInstance and inst.id == expKey then expandedNow = row end
         end
     end
-    for i = #activeRows + 1, #rowPool do
-        rowPool[i]:Hide()
-        rowPool[i]._instanceID = nil
+    for i = #instList.active + 1, #instList.pool do
+        instList.pool[i]:Hide()
+        instList.pool[i]._key = nil
     end
 
-    if not expandedStillVisible and expandedID then
-        expandedID = nil
-        wipe(editorPairs)
-        editor:Hide()
+    -- Pooled rows may now show other instances: follow the edited one, or close it.
+    if editingInstance then
+        if expandedNow then
+            expandedRow = expandedNow
+            AnchorEditor(expandedNow)
+        else
+            CollapseEditor()
+        end
     end
 
-    for _, row in ipairs(activeRows) do UpdateRowContent(row) end
-    emptyLabel:SetShown(#activeRows == 0)
+    for _, row in ipairs(instList.active) do UpdateRowContent(row) end
+    emptyLabel:SetShown(#instList.active == 0)
     Relayout()
 end
 
 local function RefreshAllRows()
-    for _, row in ipairs(activeRows) do UpdateRowContent(row) end
+    for _, list in ipairs({ instList, ctList }) do
+        for _, row in ipairs(list.active) do UpdateRowContent(row) end
+    end
 end
 
 ------------------------------------------------------------
@@ -579,16 +603,64 @@ local function BuildLocationsView(view)
     search:SetPoint("TOPRIGHT", view, "TOPRIGHT", -CONTENT_PAD, -78)
 
     -- List
-    scrollFrame, scrollChild = W.CreateScrollArea(view)
-    scrollFrame:SetPoint("TOPLEFT",     view, "TOPLEFT",     CONTENT_PAD - 4, -120)
-    scrollFrame:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -CONTENT_PAD + 12, 12)
+    local sf, sc = W.CreateScrollArea(view)
+    sf:SetPoint("TOPLEFT",     view, "TOPLEFT",     CONTENT_PAD - 4, -120)
+    sf:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -CONTENT_PAD + 12, 12)
+    instList = NewList(sf, sc)
 
     emptyLabel = T:Text(view, 14, C.muted)
-    emptyLabel:SetPoint("TOP", scrollFrame, "TOP", 0, -60)
+    emptyLabel:SetPoint("TOP", sf, "TOP", 0, -60)
     emptyLabel:SetText(L["INSTANCES_EMPTY"])
     emptyLabel:Hide()
 
     editor = CreateEditor()
+end
+
+-- Categories and their per-difficulty overrides. Keys match ZoneDetector's
+-- categories; difficulty IDs match what GetInstanceInfo() reports at runtime.
+local CONTENT_TYPES = {
+    { key = "open_world",  label = "CAT_OPEN_WORLD" },
+    { key = "dungeon",     label = "CAT_DUNGEON",
+      diffs = { { id = 1,  label = "DIFF_NORMAL" },
+                { id = 2,  label = "DIFF_HEROIC" },
+                { id = 23, label = "DIFF_MYTHIC" } } },
+    { key = "mythic_plus", label = "CAT_MYTHIC_PLUS" },
+    { key = "raid",        label = "CAT_RAID",
+      diffs = { { id = 17, label = "DIFF_LFR" },
+                { id = 14, label = "DIFF_NORMAL" },
+                { id = 15, label = "DIFF_HEROIC" },
+                { id = 16, label = "DIFF_MYTHIC" } } },
+    { key = "delve",       label = "CAT_DELVE" },
+    { key = "pvp",         label = "CAT_PVP" },
+    { key = "arena",       label = "CAT_ARENA" },
+}
+
+local function BuildContentTypesView(view)
+    CreateViewHeader(view, L["VIEW_CONTENT_TYPES"], L["VIEW_CONTENT_TYPES_DESC"])
+
+    local sf, sc = W.CreateScrollArea(view)
+    sf:SetPoint("TOPLEFT",     view, "TOPLEFT",     CONTENT_PAD - 4, -76)
+    sf:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -CONTENT_PAD + 12, 12)
+    ctList = NewList(sf, sc)
+
+    local function AddRow(tblName, key, label, isOverride)
+        local row = AcquireRow(ctList, #ctList.active + 1)
+        row._tblName, row._key = tblName, key
+        row._icon:Hide()
+        row._name:ClearAllPoints()
+        row._name:SetPoint("LEFT",  row._icon, "LEFT", isOverride and 24 or 4, 0)
+        row._name:SetPoint("RIGHT", row, "RIGHT", -300, 0)
+        row._name:SetTextColor(T.RGBA(isOverride and C.textDim or C.text))
+        row._name:SetText(label)
+        tinsert(ctList.active, row)
+    end
+
+    for _, c in ipairs(CONTENT_TYPES) do
+        AddRow("categoryAssignments", c.key, L[c.label], false)
+        for _, d in ipairs(c.diffs or {}) do
+            AddRow("difficultyAssignments", c.key .. ":" .. d.id, L[d.label], true)
+        end
+    end    RelayoutList(ctList)
 end
 
 local function BuildSettingsView(view)
@@ -809,6 +881,10 @@ local function CreateMainFrame()
     local navButtons = {}
 
     local function ShowView(viewName)
+        if viewName ~= currentView and expandedRow then
+            CollapseEditor()
+            Relayout()
+        end
         currentView = viewName
         for name, view in pairs(views) do view:SetShown(name == viewName) end
         for name, btn in pairs(navButtons) do
@@ -835,8 +911,9 @@ local function CreateMainFrame()
         end)
         navButtons[viewName] = btn
     end
-    NavButton(L["NAV_LOCATIONS"], "locations", -16)
-    NavButton(L["NAV_SETTINGS"],  "settings",  -54)
+    NavButton(L["NAV_LOCATIONS"],     "locations",     -16)
+    NavButton(L["NAV_CONTENT_TYPES"], "content_types", -54)
+    NavButton(L["NAV_SETTINGS"],      "settings",      -92)
 
     -- Quick Access (bottom of sidebar)
     local version = C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata("AnySpec", "Version")
@@ -896,6 +973,10 @@ local function CreateMainFrame()
     views.locations:SetAllPoints()
     BuildLocationsView(views.locations)
 
+    views.content_types = CreateFrame("Frame", nil, content)
+    views.content_types:SetAllPoints()
+    BuildContentTypesView(views.content_types)
+
     views.settings = CreateFrame("Frame", nil, content)
     views.settings:SetAllPoints()
     BuildSettingsView(views.settings)
@@ -925,6 +1006,7 @@ local function CreateMainFrame()
         if currentTierIdx then tierDropdown:SetSelected(currentTierIdx) end
 
         RefreshInstanceList()
+        RefreshAllRows()
     end)
 
     f:Hide()

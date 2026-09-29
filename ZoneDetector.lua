@@ -39,29 +39,62 @@ function ZD:OnPlayerLogin()
     self:OnZoneChanged()
 end
 
--- Classify current zone into a category and return full zone info.
--- Returns: { category, instanceType, instanceID, difficultyID, instanceName } or nil
--- Helper: look up EJ dungeon ID by instance name
-local function GetEJDungeonIDByName(instanceName)
-    if not EJ_GetInstanceByIndex or not EJ_GetCurrentTier then return nil end
-    
-    local savedTier = EJ_GetCurrentTier()
-    -- Check tiers 1-20 for the matching instance
-    for tier = 1, 20 do
+------------------------------------------------------------
+-- EJ instance-ID resolution
+--
+-- The config UI (UI/MainFrame.lua) keys assignments by Encounter Journal
+-- instance ID. At runtime GetInstanceInfo() returns a different ID, so we
+-- bridge the two by instance name. The lookup covers BOTH dungeons and raids,
+-- and the name→ID map is built once and cached — rebuilding it on every zone
+-- change (20 tiers × up to 999 instances) would be far too expensive.
+------------------------------------------------------------
+local ejNameToID = nil  -- lazily-built { [instanceName] = ejInstanceID }
+
+local function EnsureEJLoaded()
+    if C_AddOns and not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
+        C_AddOns.LoadAddOn("Blizzard_EncounterJournal")
+    end
+end
+
+-- Build { [instanceName] = ejInstanceID } across all tiers, dungeons and raids.
+local function BuildEJNameCache()
+    if not EJ_GetInstanceByIndex or not EJ_GetNumTiers then return {} end
+    EnsureEJLoaded()
+
+    local cache = {}
+    local savedTier = EJ_GetCurrentTier and EJ_GetCurrentTier() or nil
+    for tier = 1, EJ_GetNumTiers() do
         EJ_SelectTier(tier)
-        for i = 1, 999 do
-            local id, name = EJ_GetInstanceByIndex(i, false)  -- false = dungeons
-            if not id then break end
-            if name and name == instanceName then
-                EJ_SelectTier(savedTier)
-                return id
+        for _, isRaid in ipairs({ false, true }) do  -- false = dungeons, true = raids
+            for i = 1, 999 do
+                local id, name = EJ_GetInstanceByIndex(i, isRaid)
+                if not id then break end
+                if name and name ~= "" then
+                    cache[name] = id
+                end
             end
         end
     end
-    EJ_SelectTier(savedTier)
-    return nil
+    if savedTier then EJ_SelectTier(savedTier) end
+    return cache
 end
 
+-- Resolve an instance name to its EJ instance ID, building the cache on first use.
+local function GetEJInstanceIDByName(instanceName)
+    if not instanceName then return nil end
+    if not ejNameToID then
+        local cache = BuildEJNameCache()
+        if next(cache) == nil then
+            -- EJ data not ready yet; leave uncached so we retry on the next zone change.
+            return nil
+        end
+        ejNameToID = cache
+    end
+    return ejNameToID[instanceName]
+end
+
+-- Classify current zone into a category and return full zone info.
+-- Returns: { category, instanceType, instanceID, difficultyID, instanceName } or nil
 function ZD:GetCurrentZoneInfo()
     local inInstance, instanceType = IsInInstance()
 
@@ -81,9 +114,9 @@ function ZD:GetCurrentZoneInfo()
 
     local category = self:ClassifyInstance(instType, instDiff)
 
-    -- Try to find the EJ dungeon ID by matching the instance name
-    local ejDungeonID = GetEJDungeonIDByName(instName)
-    local usedID = ejDungeonID or lfgDungeonID or instID
+    -- Resolve the EJ instance ID (dungeons and raids) so it matches the config's key space.
+    local ejInstanceID = GetEJInstanceIDByName(instName)
+    local usedID = ejInstanceID or lfgDungeonID or instID
 
     return {
         category = category,
