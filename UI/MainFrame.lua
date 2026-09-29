@@ -924,6 +924,9 @@ local function CreateMainFrame()
     local tile = CreateFrame("Button", nil, sidebar, "BackdropTemplate")
     tile:SetSize(SIDEBAR_W - 24, 52)
     tile:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 12, 36)
+    tile:EnableMouse(true)
+    tile:SetFrameLevel(sidebar:GetFrameLevel() + 10)  -- stay above every sibling/overlay
+    tile:RegisterForClicks("LeftButtonUp")
     tile:RegisterForDrag("LeftButton")
     T:Surface(tile, C.surface, C.borderHi)
 
@@ -943,10 +946,15 @@ local function CreateMainFrame()
         end
         local id = AcquireMacro("switch", "AnySpec", GetCurrentSpecIcon(), "ANYSPEC_SWITCH")
         if id then
+            ClearCursor()
             PickupMacro(id)
         else
             print(L["ERR_NO_MACRO_SLOT"])
         end
+    end)
+    -- A plain click used to do nothing at all; say how to use the tile.
+    tile:SetScript("OnClick", function()
+        print(L["QUICKACCESS_CLICK_HINT"])
     end)
     tile:SetScript("OnEnter", function(self)
         T:Surface(self, C.surfaceHi, C.borderHi)

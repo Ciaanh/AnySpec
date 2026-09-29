@@ -12,6 +12,7 @@ L["ADDON_PREFIX"]               = "|cff00aaffAny|r|cffffffffSpec|r"
 -- ── Quick Access (left panel drag buttons) ────────────────────────────────────
 L["QUICKACCESS_TITLE"]          = "Quick access"
 L["QUICKACCESS_DESC"]           = "Drag to an action bar"
+L["QUICKACCESS_CLICK_HINT"]     = "AnySpec: Drag this button onto an action bar to create the spec selector shortcut."
 L["QUICKACCESS_SWITCH_NAME"]    = "Spec Selector"
 L["QUICKACCESS_SWITCH_TIP"]     = "Opens a popup to choose any specialization."
 
