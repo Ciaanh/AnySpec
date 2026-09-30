@@ -1,0 +1,26 @@
+# Normalize all text files to LF in the repository.
+# Windows working copies still get CRLF via core.autocrlf / eol settings.
+* text=auto
+
+*.lua   text
+*.toc   text
+*.xml   text
+*.md    text
+*.txt   text
+*.json  text
+
+# PowerShell stays CRLF on disk everywhere.
+*.ps1   text eol=crlf
+
+# Shell scripts stay LF, or bash chokes on the CR.
+*.sh    text eol=lf
+
+# Binary assets shipped with addons - never touch these.
+*.zip   binary
+*.blp   binary
+*.tga   binary
+*.png   binary
+*.jpg   binary
+*.ogg   binary
+*.mp3   binary
+*.ttf   binary

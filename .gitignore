@@ -3,3 +3,5 @@ refs
 docs
 .vscode/
 tmpclaude-*
+.build/
+AnySpec/
