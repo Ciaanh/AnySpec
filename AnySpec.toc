@@ -1,5 +1,5 @@
-## Interface: 120001
-## Interface-Retail: 120001
+## Interface: 120100
+## Interface-Retail: 120100
 
 ## Title: AnySpec
 ## Notes: Automatic spec switching based on content type, with quick-switch button and proposal toasts.
