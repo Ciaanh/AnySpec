@@ -1,0 +1,42 @@
+# Runs on every push to main and every pull request; release.yml calls it too, so a tag that fails
+# here is never published. This file is identical in every addon repo:
+#   - every tracked Lua file must compile under Lua 5.1 (luac -p), embedded libs/ excepted;
+#   - tests/run.sh, when the repo has a suite, must pass.
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lua5.1
+
+      - name: Syntax-check the Lua files
+        run: |
+          status=0
+          while IFS= read -r -d '' file; do
+            luac5.1 -p "$file" || status=1
+          done < <(git ls-files -z -- '*.lua' ':(exclude,icase)libs/**')
+          exit $status
+
+      - name: Run the suite
+        if: hashFiles('tests/run.sh') != ''
+        run: ./tests/run.sh
+        env:
+          LUA: lua5.1
+          LUAC: luac5.1

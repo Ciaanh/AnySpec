@@ -1,0 +1,171 @@
+# Publishes the addon to CurseForge, GitHub Releases and, when the TOC has an X-WoWI-ID,
+# WoWInterface, on every version tag push once the test suite passes
+# (e.g. `git tag v1.0.0-beta1 && git push origin v1.0.0-beta1`).
+#
+# This file is identical in every addon repo: the addon name is `package-as:` in .pkgmeta, the
+# CurseForge / WoWInterface project ids are the TOC's X-Curse-Project-ID / X-WoWI-ID, the game
+# versions come from `## Interface:`, and the package contents from .pkgmeta.
+#
+# The tag, `## Version:` in the TOC and the topmost CHANGELOG.md section must all name the same
+# version, suffix included, or the run fails before anything is uploaded. A tag with a suffix
+# (v1.0.0-beta1, v1.0.0-alpha2) is a pre-release: the packager uploads it as Beta or Alpha, its
+# notes open with a test-version banner, and it is never taken as the previous release -- so the
+# final v1.0.0 publishes every section since the last final release, pre-releases included.
+#
+# The packager skips any host it has no id or token for and still succeeds, so the run checks
+# those up front, and checks at the end that the GitHub release carries the addon zip.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   CF_API_KEY     - required; https://authors.curseforge.com/#/settings/api-tokens
+#   WOWI_API_TOKEN - only with X-WoWI-ID; WoWInterface File Control Panel > My API Tokens
+# GitHub Releases use the workflow's own GITHUB_TOKEN.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag, the TOC and the hosts' setup agree
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+        run: |
+          addon=""
+          if [ -f .pkgmeta ]; then
+            addon="$(sed -n 's/^package-as:[[:space:]]*//p' .pkgmeta | tr -d '\r' | sed 's/[[:space:]]*$//')"
+          fi
+          if [ -z "$addon" ] || [ ! -f "$addon.toc" ]; then
+            echo "::error::.pkgmeta 'package-as: $addon' does not name a TOC at the repository root"
+            exit 1
+          fi
+          echo "ADDON=$addon" >> "$GITHUB_ENV"
+
+          version="${GITHUB_REF_NAME#v}"
+          toc_field() {
+            sed -n "s/^## $1:[[:space:]]*//p" "$addon.toc" | tr -d '\r' | sed 's/[[:space:]]*$//' | head -n 1
+          }
+
+          toc_version="$(toc_field Version)"
+          if [ "$toc_version" != "$version" ]; then
+            echo "::error::TOC '## Version: $toc_version' does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+          project_id="$(toc_field X-Curse-Project-ID)"
+          if ! [[ "$project_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::$addon.toc has no '## X-Curse-Project-ID: <id>' line"
+            exit 1
+          fi
+          if [ -z "$CF_API_KEY" ]; then
+            echo "::error::repository secret CF_API_KEY is not set"
+            exit 1
+          fi
+
+          wowi_id="$(toc_field X-WoWI-ID)"
+          if [ -n "$wowi_id" ]; then
+            if ! [[ "$wowi_id" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::$addon.toc '## X-WoWI-ID: $wowi_id' is not a numeric id"
+              exit 1
+            fi
+            if [ -z "$WOWI_API_TOKEN" ]; then
+              echo "::error::$addon.toc has an X-WoWI-ID but repository secret WOWI_API_TOKEN is not set"
+              exit 1
+            fi
+          fi
+
+      - name: Trim changelog to everything since the previous release
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=""
+          case "$version" in
+            *-*) prerelease="${version#*-}" ;;
+          esac
+          prev="$(git describe --tags --abbrev=0 --match 'v*' --exclude 'v*-*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          prev="${prev#v}"
+
+          awk -v stop="## [$prev]" '
+            /^## \[/ {
+              if (found && index($0, stop) == 1) exit
+              if ($0 !~ /\[Unreleased\]/) found = 1
+            }
+            found
+          ' CHANGELOG.md > release-changelog.md
+
+          if ! head -n 1 release-changelog.md | grep -qF "## [$version]"; then
+            echo "::error::CHANGELOG.md topmost released section does not match tag $GITHUB_REF_NAME"
+            cat release-changelog.md
+            exit 1
+          fi
+
+          if [ -n "$prev" ] && ! grep -qF "## [$prev]" CHANGELOG.md; then
+            echo "::warning::previous release v$prev has no CHANGELOG.md section; published notes cover the whole file"
+          fi
+
+          if [ -n "$prerelease" ]; then
+            {
+              echo "> **Test version ($prerelease).** This build previews ${version%%-*}, so things may still change before the full release."
+              echo
+              cat release-changelog.md
+            } > release-changelog.tmp
+            mv release-changelog.tmp release-changelog.md
+          fi
+
+          echo "Publishing notes since ${prev:-<first release>}:"
+          grep -E '^## \[' release-changelog.md
+          mv release-changelog.md CHANGELOG.md
+
+      - name: Package and publish
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+      # The packager names the zip {package-name}-{tag}, plus a -<flavor> suffix for a
+      # single-flavor Classic build, and puts the addon folder at its root.
+      - name: Check the GitHub release carries the addon zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! assets="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>&1)"; then
+            echo "::error::no GitHub release for tag $GITHUB_REF_NAME"
+            echo "$assets"
+            exit 1
+          fi
+
+          tag_re="${GITHUB_REF_NAME//./\\.}"
+          zip="$(grep -E "^${ADDON}-${tag_re}(-[a-z]+)?\.zip$" <<< "$assets" | head -n 1 || true)"
+          if [ -z "$zip" ]; then
+            echo "::error::GitHub release $GITHUB_REF_NAME has no $ADDON-$GITHUB_REF_NAME.zip asset"
+            echo "Assets:"
+            echo "$assets"
+            exit 1
+          fi
+
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern "$zip" --dir "$RUNNER_TEMP"
+          listing="$(unzip -Z1 "$RUNNER_TEMP/$zip")"
+          if ! grep -qxF "$ADDON/$ADDON.toc" <<< "$listing"; then
+            echo "::error::$zip does not contain $ADDON/$ADDON.toc"
+            echo "$listing"
+            exit 1
+          fi
+
+          echo "$zip is attached to release $GITHUB_REF_NAME:"
+          echo "$listing"
