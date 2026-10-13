@@ -4,7 +4,7 @@
 ## Title: AnySpec
 ## Notes: Automatic spec switching based on content type, with quick-switch button and proposal toasts.
 ## Author: AnySpec
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: AnySpecDB
 ## SavedVariablesPerCharacter: AnySpecCharDB
 
