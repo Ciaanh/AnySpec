@@ -1,10 +1,10 @@
-## Interface: 120001
-## Interface-Retail: 120001
+## Interface: 120105
+## Interface-Retail: 120105
 
 ## Title: AnySpec
 ## Notes: Automatic spec switching based on content type, with quick-switch button and proposal toasts.
 ## Author: AnySpec
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: AnySpecDB
 ## SavedVariablesPerCharacter: AnySpecCharDB
 
@@ -20,6 +20,7 @@ Locales\Localization.xml
 SpecManager.lua
 ZoneDetector.lua
 AutoSwitch.lua
+UI\Theme.lua
 UI\Widgets.lua
 UI\MinimapButton.lua
 UI\MainFrame.lua
