@@ -66,15 +66,16 @@ local specPill       = nil
 local quickAccessIcon = nil
 
 ------------------------------------------------------------
--- Macro helpers  (Plumber-style drag-to-action-bar)
+-- Macro helpers  (drag a macro onto the action bar)
 ------------------------------------------------------------
 local MACRO_TAG = "#anyspec"
 
 -- MAX_*_MACROS are defined by Blizzard_MacroUI, which loads on demand:
 -- load it if needed and fall back to the current retail limits.
+-- C_AddOns.LoadAddOn reports a missing or disabled addon by its return values, it does not raise.
 local function MacroLimits()
     if not MAX_ACCOUNT_MACROS and C_AddOns and C_AddOns.LoadAddOn then
-        pcall(C_AddOns.LoadAddOn, "Blizzard_MacroUI")
+        C_AddOns.LoadAddOn("Blizzard_MacroUI")
     end
     return MAX_ACCOUNT_MACROS or 120, MAX_CHARACTER_MACROS or 30
 end

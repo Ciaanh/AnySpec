@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Loading Blizzard's macro UI (for the macro limits) is no longer wrapped in `pcall`: an error
+  there now shows up in BugSack instead of being swallowed.
+
 ## [0.2.0] - 2026-10-13
 
 ### Added
